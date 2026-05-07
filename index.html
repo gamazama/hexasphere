@@ -152,13 +152,16 @@
     color: #ccc; font: 12px/1.4 ui-monospace, Menlo, monospace;
     background: rgba(20,20,20,0.7); padding: 8px 10px; border-radius: 4px;
     display: flex; flex-direction: column; gap: 5px;
-    width: 240px; z-index: 4;
+    width: 270px; z-index: 4;
+    box-sizing: border-box;
   }
-  #flagControls .row { display: flex; gap: 6px; align-items: center; }
-  #flagControls .lbl { width: 60px; color: #aaa; }
+  #flagControls .row { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  #flagControls .lbl { width: 52px; flex: 0 0 52px; color: #aaa; }
+  #flagControls .unit { width: 8px; flex: 0 0 8px; color: #666; }
   #flagControls input[type="number"] {
-    width: 50px; background: #111; color: #fff; border: 1px solid #444;
-    padding: 2px 4px; font: inherit; text-align: right;
+    width: 48px; flex: 0 0 48px;
+    background: #111; color: #fff; border: 1px solid #444;
+    padding: 2px 4px; font: inherit; text-align: right; box-sizing: border-box;
   }
   #flagControls input[type="range"] {
     -webkit-appearance: none; appearance: none;
@@ -187,7 +190,8 @@
   /* Small "bump" buttons next to numeric inputs (±30° rotate, etc.) */
   button.bumpBtn {
     background: #222; color: #fff; border: 1px solid #555;
-    padding: 1px 6px; font: inherit; cursor: pointer;
+    padding: 1px 5px; font: inherit; cursor: pointer;
+    flex: 0 0 auto;
   }
   button.bumpBtn:hover { background: #333; }
   button.bumpBtn:disabled { color: #666; cursor: default; }
@@ -348,7 +352,6 @@
     <input id="globalFlagRotateRange" type="range" min="-180" max="180" step="1" value="0" />
     <input id="globalFlagRotate" type="number" step="1" value="0" />
     <button id="globalRotPlus" type="button" class="bumpBtn" title="rotate all +30°">+30°</button>
-    <span class="unit">°</span>
   </div>
   <div class="row">
     <span class="lbl">all scl:</span>
@@ -366,7 +369,6 @@
     <button id="cellRotMinus" type="button" class="bumpBtn" title="rotate -30°" disabled>−30°</button>
     <input id="cellRot" type="number" step="1" value="0" disabled title="any degree value; the ±30 buttons snap to flag-friendly increments" />
     <button id="cellRotPlus" type="button" class="bumpBtn" title="rotate +30°" disabled>+30°</button>
-    <span class="unit">°</span>
   </div>
   <div class="row">
     <span class="lbl">scale:</span>
@@ -1757,7 +1759,11 @@ function renderSnapshot() {
     const base = pentVerts.length / 3;
     for (const v of g.verts) pentVerts.push(v.x, v.y, v.z);
     for (const f of g.faces) pentIdx.push(base + f[0], base + f[1], base + f[2]);
-    for (const f of (g.sideFaces || [])) pentIdx.push(base + f[0], base + f[1], base + f[2]);
+    for (const f of (g.sideFaces || []))    pentIdx.push(base + f[0], base + f[1], base + f[2]);
+    // Pent chamfer-bevel walls also belong here. Hex chamfer walls have their own
+    // mesh below (driven by `chamferMat`); pents always render dark, so they're
+    // simply folded into this same pent_dark group.
+    for (const f of (g.chamferFaces || [])) pentIdx.push(base + f[0], base + f[1], base + f[2]);
   });
   if (pentVerts.length) {
     const pg = new THREE.BufferGeometry();
@@ -2429,6 +2435,10 @@ async function exportMP4() {
       const a = t * Math.PI * 2;
       camera.position.set(Math.cos(a) * xzRad, camY, Math.sin(a) * xzRad);
       camera.lookAt(0, 0, 0);
+      // The export loop bypasses tick(), so re-sync the studio rig here so
+      // lighting + shadow stay anchored to the camera frame instead of drifting
+      // as the camera orbits.
+      if (renderer.shadowMap.enabled) studioRig.quaternion.copy(camera.quaternion);
       renderer.render(scene, camera);
       const frame = new VideoFrame(renderer.domElement, {
         timestamp: Math.round(i * 1e6 / fps),
