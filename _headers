@@ -1,0 +1,22 @@
+# Cloudflare Pages headers
+# Reference: https://developers.cloudflare.com/pages/configuration/headers/
+# Rules cascade: more specific paths override Cache-Control, while broader
+# security headers from /* continue to apply.
+
+# Default to a sensible security baseline for everything.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# Long cache on the 48 flag PNGs — they never change.
+/flags/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# HTML: short cache so deploys roll out quickly. Browsers will revalidate at
+# most once per minute. Ensures users see new builds within 60s of the
+# Cloudflare deploy completing.
+/
+  Cache-Control: public, max-age=60, must-revalidate
+/index.html
+  Cache-Control: public, max-age=60, must-revalidate
