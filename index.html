@@ -350,10 +350,10 @@
     <input id="exportScale" type="number" step="1" value="100" title="OBJ vertex multiplier (Cinema 4D defaults to cm; 100 = 100 cm sphere)" style="width:60px"/>
     <span class="unit"></span>
   </div>
-  <div class="row" style="gap:4px"><span class="lbl">obj illum:</span>
-    <select id="exportIllum" title="MTL illumination model: 1 = no specular (cleanest for flag textures), 2 = with specular">
-      <option value="1" selected>1 (matte)</option>
-      <option value="2">2 (specular)</option>
+  <div class="row" style="gap:4px"><span class="lbl">finish:</span>
+    <select id="exportIllum" title="material finish — drives both the live preview and the MTL/PBR fields written into the OBJ export">
+      <option value="1" selected>matte</option>
+      <option value="2">shiny</option>
     </select>
   </div>
 </div>
@@ -915,8 +915,12 @@ function buildCellGeometry(cell, vVerts, uvData, opts) {
   const hasExtrude = Math.abs(extrudeAmp) > 1e-4 || Math.abs(eScale - 1) > 1e-3;
   const hasInset = reach > 0.005 || Math.abs(height) > 1e-3;
 
-  // Curve → power-law exponent
-  const q = Math.pow(2, -2 * curve);
+  // Curve → power-law exponent. Halved sensitivity vs. the original `-2*curve`
+  // mapping: at curve=+1 the old formula gave q=0.25 → profile = t^0.25, which
+  // jumped ~84% of the way to the cap on the first ring above the base. With
+  // -curve the extreme is q=0.5 (sqrt) — still a clear ease-out, but the first
+  // ring rises smoothly instead of flying out near the base.
+  const q = Math.pow(2, -curve);
 
   // ---- 2. Determine the ring layout ----
   // Extrude phase contributes (extrudeSub+1) "unique" rings: base + (extrudeSub) intermediates.
@@ -1787,11 +1791,19 @@ function renderSnapshot() {
   // Material factory — picks between an unlit basic and a lit standard material.
   // flatShading on the lit path keeps panel edges crisp instead of smoothing across
   // shared verts (so extruded side walls read as flat panels, not rounded).
+  // Finish — read from the same dropdown that drives MTL export so the live
+  // preview matches what the OBJ file will look like in any external renderer.
+  // Shiny = low roughness + tiny metallic kick for a varnished sheen; matte
+  // is the boring lambert-ish look from before.
+  const finish = document.getElementById('exportIllum')?.value || '1';
+  const isShiny = finish === '2';
   const makeMaterial = ({ map = null, color = 0xffffff } = {}) => {
     if (lit) {
       return new THREE.MeshStandardMaterial({
         map, color, side: THREE.DoubleSide,
-        roughness: 0.85, metalness: 0.0, flatShading: true,
+        roughness: isShiny ? 0.18 : 0.85,
+        metalness: isShiny ? 0.10 : 0.00,
+        flatShading: true,
       });
     }
     return new THREE.MeshBasicMaterial({ map, color, side: THREE.DoubleSide });
@@ -2765,6 +2777,7 @@ document.getElementById('lightingPreset').addEventListener('change', e => {
   applyLightingPreset(e.target.value);
   reRender();
 });
+document.getElementById('exportIllum').addEventListener('change', reRender);
 bindNumRangePair('floorY', 'floorYRange', () => {
   const v = parseFloat(document.getElementById('floorY').value);
   if (Number.isFinite(v)) floorMesh.position.y = v;
