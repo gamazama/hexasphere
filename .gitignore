@@ -1,0 +1,23 @@
+# Algorithm test harness — kept locally for re-runs but not deployed.
+hex-test/
+
+# OBJ snapshots from prior export sessions.
+backup/
+
+# Old single-file copy kept around as a working backup until index.html stabilises.
+hexsphere - Copy.html
+
+# Design sources next to the runtime flags. The runtime needs flags/worldcup-flags/
+# only; the PSD + the JPEG dump + the icosa layout JSON are studio sources.
+flags/flagTextures*.jpg
+flags/flagTextures*.psd
+flags/icosa-layout.json
+
+# Editor / OS detritus
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+.claude/
+node_modules/

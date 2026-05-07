@@ -1,0 +1,2399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>GMT Hex Sphere</title>
+<meta name="description" content="Generate, customise and export hexagonal spheres with national flags. A standalone GMT tool by Guy Zack." />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 10px; left: 12px;
+    color: #888; font: 11px/1.4 ui-monospace, Menlo, monospace;
+    user-select: none;
+    white-space: pre;
+    pointer-events: none;
+  }
+  /* Texture loading indicator — shown until the 48 flag PNGs decode */
+  #loading {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    color: #ccc; font: 12px/1.4 ui-monospace, Menlo, monospace;
+    background: rgba(20,20,20,0.85); padding: 12px 16px; border-radius: 4px;
+    border: 1px solid #444;
+    pointer-events: none;
+  }
+  #loading.done { display: none; }
+  /* Footer — sponsor / about links, monospace to match the rest of the chrome */
+  #footer {
+    position: fixed; bottom: 8px; left: 12px;
+    color: #777; font: 11px/1.4 ui-monospace, Menlo, monospace;
+    user-select: none;
+    z-index: 5;
+  }
+  #footer a { color: #aaa; text-decoration: none; padding: 0 2px; }
+  #footer a:hover { color: #fff; }
+  #footer .sep { color: #555; }
+  /* MP4 export dialog */
+  #mp4Dialog {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20,20,20,0.96); border: 1px solid #444;
+    color: #ccc; font: 12px/1.5 ui-monospace, Menlo, monospace;
+    padding: 14px 16px; border-radius: 4px;
+    min-width: 320px; display: none; z-index: 100;
+  }
+  #mp4Dialog h3 { margin: 0 0 10px; font-size: 12px; color: #fff; font-weight: normal; }
+  #mp4Dialog .row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  #mp4Dialog .row label { width: 100px; color: #aaa; }
+  #mp4Dialog input[type="number"] {
+    width: 70px; background: #111; color: #fff; border: 1px solid #444;
+    padding: 3px 5px; font: inherit; text-align: right;
+  }
+  #mp4Dialog .progress { height: 3px; background: #222; margin: 8px 0 4px; }
+  #mp4Dialog .progress > .bar { height: 100%; background: #4af; width: 0%; transition: width 0.1s; }
+  #mp4Dialog .actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
+  #mp4Dialog button {
+    background: #222; color: #fff; border: 1px solid #555;
+    padding: 4px 12px; font: inherit; cursor: pointer;
+  }
+  #mp4Dialog button:hover { background: #333; }
+  #mp4Dialog button:disabled { color: #666; cursor: default; }
+  #mp4Dialog .status { color: #888; font-size: 11px; min-height: 14px; margin-top: 4px; }
+  #mp4Dialog .err { color: #f66; }
+  #controls {
+    position: fixed; top: 10px; right: 12px;
+    color: #ccc; font: 12px/1.4 ui-monospace, Menlo, monospace;
+    background: rgba(20,20,20,0.7); padding: 8px 10px; border-radius: 4px;
+    display: flex; gap: 6px; align-items: center;
+  }
+  #controls input {
+    width: 60px; background: #111; color: #fff; border: 1px solid #444;
+    padding: 3px 5px; font: inherit;
+  }
+  #controls button {
+    background: #222; color: #fff; border: 1px solid #555;
+    padding: 3px 10px; font: inherit; cursor: pointer;
+  }
+  #controls button:hover { background: #333; }
+  #scanResults {
+    position: fixed; bottom: 10px; right: 12px;
+    color: #ccc; font: 11px/1.3 ui-monospace, Menlo, monospace;
+    background: rgba(20,20,20,0.85); padding: 8px 10px; border-radius: 4px;
+    max-height: 50vh; overflow-y: auto; min-width: 280px;
+    display: none;
+  }
+  #scanResults table { border-collapse: collapse; width: 100%; }
+  #scanResults th, #scanResults td { padding: 2px 6px; text-align: right; }
+  #scanResults th { color: #888; border-bottom: 1px solid #444; }
+  #scanResults tr.best td { color: #6f6; }
+  #scanResults tr:hover { background: rgba(255,255,255,0.05); cursor: pointer; }
+  #geomControls {
+    position: fixed; top: 56px; right: 12px;
+    color: #ccc; font: 12px/1.4 ui-monospace, Menlo, monospace;
+    background: rgba(20,20,20,0.7); padding: 8px 10px; border-radius: 4px;
+    display: flex; flex-direction: column; gap: 5px;
+    width: 260px;
+  }
+  #geomControls .row { display: flex; gap: 6px; align-items: center; }
+  #geomControls .lbl { width: 50px; color: #aaa; }
+  #geomControls input[type="number"] {
+    width: 44px; background: #111; color: #fff; border: 1px solid #444;
+    padding: 2px 4px; font: inherit; text-align: right;
+  }
+  #geomControls .unit { color: #666; width: 8px; }
+  #geomControls input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    background: transparent; flex: 1; height: 14px; margin: 0; padding: 0;
+    cursor: pointer;
+  }
+  #geomControls input[type="range"]::-webkit-slider-runnable-track {
+    height: 1px; background: #444; border: 0;
+  }
+  #geomControls input[type="range"]::-moz-range-track {
+    height: 1px; background: #444; border: 0;
+  }
+  #geomControls input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 8px; height: 12px; background: #fff; border: 0; border-radius: 0;
+    margin-top: -6px; cursor: pointer;
+  }
+  #geomControls input[type="range"]::-moz-range-thumb {
+    width: 8px; height: 12px; background: #fff; border: 0; border-radius: 0;
+    cursor: pointer;
+  }
+  /* Custom checkbox to match the input/button style */
+  input[type="checkbox"].styled {
+    -webkit-appearance: none; appearance: none;
+    width: 13px; height: 13px;
+    background: #111; border: 1px solid #444;
+    cursor: pointer; position: relative;
+    vertical-align: middle; margin: 0 4px 0 0;
+  }
+  input[type="checkbox"].styled:hover { border-color: #666; }
+  input[type="checkbox"].styled:checked { background: #333; border-color: #888; }
+  input[type="checkbox"].styled:checked::after {
+    content: ''; position: absolute;
+    top: 1px; left: 4px; width: 3px; height: 7px;
+    border: solid #fff; border-width: 0 1px 1px 0;
+    transform: rotate(45deg);
+  }
+  #geomControls label.cb { display: flex; align-items: center; cursor: pointer; }
+  #geomControls select {
+    background: #111; color: #fff; border: 1px solid #444;
+    padding: 2px 4px; font: inherit; cursor: pointer; flex: 1;
+  }
+  /* Flag panel — global + per-cell UV controls. Mirrors #geomControls styling. */
+  #flagControls {
+    position: fixed; top: 10px; left: 12px; margin-top: 110px;
+    color: #ccc; font: 12px/1.4 ui-monospace, Menlo, monospace;
+    background: rgba(20,20,20,0.7); padding: 8px 10px; border-radius: 4px;
+    display: flex; flex-direction: column; gap: 5px;
+    width: 240px; z-index: 4;
+  }
+  #flagControls .row { display: flex; gap: 6px; align-items: center; }
+  #flagControls .lbl { width: 60px; color: #aaa; }
+  #flagControls input[type="number"] {
+    width: 50px; background: #111; color: #fff; border: 1px solid #444;
+    padding: 2px 4px; font: inherit; text-align: right;
+  }
+  #flagControls input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    background: transparent; flex: 1; height: 14px; margin: 0; padding: 0;
+    cursor: pointer;
+  }
+  #flagControls input[type="range"]::-webkit-slider-runnable-track { height: 1px; background: #444; border: 0; }
+  #flagControls input[type="range"]::-moz-range-track { height: 1px; background: #444; border: 0; }
+  #flagControls input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 8px; height: 12px; background: #fff; border: 0; border-radius: 0;
+    margin-top: -6px; cursor: pointer;
+  }
+  #flagControls input[type="range"]::-moz-range-thumb {
+    width: 8px; height: 12px; background: #fff; border: 0; border-radius: 0; cursor: pointer;
+  }
+  #flagControls select {
+    background: #111; color: #fff; border: 1px solid #444;
+    padding: 2px 4px; font: inherit; cursor: pointer; flex: 1; min-width: 0;
+  }
+  #flagControls .section {
+    margin-top: 4px; padding-top: 6px; border-top: 1px solid #333;
+    color: #888; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  #flagControls .hint { color: #777; font-size: 10px; }
+  /* Cell-pick crosshair on hover */
+  #pickInfo {
+    position: fixed; bottom: 28px; left: 12px;
+    color: #777; font: 10px/1.4 ui-monospace, Menlo, monospace;
+    pointer-events: none; user-select: none; z-index: 5;
+  }
+</style>
+</head>
+<body>
+<div id="hud">drag to rotate · scroll to zoom · click a cell to edit its flag</div>
+<div id="loading">loading flags 0/48…</div>
+<div id="footer">
+  <a href="https://gmt-fractals.com" target="_blank" rel="noopener">GMT</a>
+  <span class="sep">·</span>
+  <a href="https://ko-fi.com/gmtfractals" target="_blank" rel="noopener">Ko-fi</a>
+  <span class="sep">·</span>
+  <a href="https://www.paypal.com/ncp/payment/WHMZWATKN6GEY" target="_blank" rel="noopener">PayPal</a>
+  <span class="sep">·</span>
+  <a href="https://github.com/gamazama/GMT-fractals" target="_blank" rel="noopener">Source (GPL-3.0)</a>
+  <span class="sep">·</span>
+  <a id="shareLink" href="#" title="copy link to this configuration">copy link</a>
+</div>
+<div id="controls">
+  hexagons:
+  <input id="hexCount" type="number" min="8" max="500" value="50" />
+  quality:
+  <select id="quality" title="topology search effort">
+    <option value="fast">fast</option>
+    <option value="standard" selected>standard</option>
+    <option value="max">max</option>
+  </select>
+  <button id="rebuild">generate</button>
+  <button id="scan">scan range</button>
+  <button id="export">export obj</button>
+  <button id="exportMp4">export mp4</button>
+</div>
+<div id="scanResults"></div>
+<div id="mp4Dialog">
+  <h3>turntable MP4</h3>
+  <div class="row"><label>duration (s)</label><input id="mp4Duration" type="number" min="1" max="60" step="1" value="8" /></div>
+  <div class="row"><label>fps</label><input id="mp4Fps" type="number" min="12" max="60" step="1" value="30" /></div>
+  <div class="row"><label>width</label><input id="mp4Width" type="number" min="320" step="2" value="1920" /></div>
+  <div class="row"><label>height</label><input id="mp4Height" type="number" min="320" step="2" value="1080" /></div>
+  <div class="row"><label>bitrate (Mbps)</label><input id="mp4Bitrate" type="number" min="1" max="200" step="1" value="12" /></div>
+  <div class="progress"><div class="bar" id="mp4Bar"></div></div>
+  <div class="status" id="mp4Status">click render to start</div>
+  <div class="actions">
+    <button id="mp4Cancel">close</button>
+    <button id="mp4Start">render</button>
+  </div>
+</div>
+<div id="pickInfo"></div>
+<!-- Geometry controls. Range inputs clamp to a sensible visual range; number inputs
+     are unbounded so users can type values past the slider min/max for extreme looks. -->
+<div id="geomControls">
+  <div class="row">
+    <span class="lbl">chamfer:</span>
+    <input id="chamferRange" type="range" min="0" max="50" step="1" value="0" />
+    <input id="chamfer" type="number" step="1" value="0" />
+    <span class="unit">%</span>
+  </div>
+  <div class="row">
+    <span class="lbl">ch sub:</span>
+    <input id="chamferSubRange" type="range" min="0" max="20" step="1" value="0" />
+    <input id="chamferSub" type="number" step="1" value="0" />
+    <span class="unit"></span>
+  </div>
+  <div class="row">
+    <span class="lbl">ch mat:</span>
+    <select id="chamferMat">
+      <option value="dark" selected>dark</option>
+      <option value="light">light</option>
+      <option value="flag">stretched flag</option>
+    </select>
+  </div>
+  <div class="row">
+    <span class="lbl">extrude:</span>
+    <input id="extrudeRange" type="range" min="-100" max="100" step="1" value="0" />
+    <input id="extrude" type="number" step="1" value="0" />
+    <span class="unit">%</span>
+  </div>
+  <div class="row">
+    <span class="lbl">ex scale:</span>
+    <input id="extrudeScaleRange" type="range" min="0" max="200" step="1" value="100" />
+    <input id="extrudeScale" type="number" step="1" value="100" />
+    <span class="unit">%</span>
+  </div>
+  <div class="row">
+    <span class="lbl">ex sub:</span>
+    <input id="extrudeSubRange" type="range" min="0" max="20" step="1" value="0" />
+    <input id="extrudeSub" type="number" step="1" value="0" />
+    <span class="unit"></span>
+  </div>
+  <div class="row">
+    <span class="lbl">side:</span>
+    <select id="sideMode">
+      <option value="border" selected>dark border</option>
+      <option value="flag">stretched flag</option>
+    </select>
+  </div>
+  <div class="row">
+    <span class="lbl">inset:</span>
+    <input id="insetRange" type="range" min="0" max="99" step="1" value="0" />
+    <input id="inset" type="number" step="1" value="0" />
+    <span class="unit">%</span>
+  </div>
+  <div class="row">
+    <span class="lbl">sub:</span>
+    <input id="subdivisionRange" type="range" min="0" max="20" step="1" value="0" />
+    <input id="subdivision" type="number" step="1" value="0" />
+    <span class="unit"></span>
+  </div>
+  <div class="row">
+    <span class="lbl">height:</span>
+    <input id="heightRange" type="range" min="-100" max="100" step="1" value="0" />
+    <input id="height" type="number" step="1" value="0" />
+    <span class="unit">%</span>
+  </div>
+  <div class="row">
+    <span class="lbl">curve:</span>
+    <input id="curveRange" type="range" min="-100" max="100" step="1" value="0" />
+    <input id="curve" type="number" step="1" value="0" />
+    <span class="unit">%</span>
+  </div>
+  <div class="row"><label class="cb"><input id="lit" type="checkbox" class="styled" /> lit + shadows + backdrop</label></div>
+  <div class="row"><label class="cb"><input id="wireframeMesh" type="checkbox" class="styled" /> wireframe mesh preview</label></div>
+  <div class="row"><label class="cb"><input id="triangulate" type="checkbox" class="styled" /> triangulate export</label></div>
+  <div class="row" style="gap:4px"><span class="lbl">obj scale:</span>
+    <input id="exportScale" type="number" step="1" value="100" title="OBJ vertex multiplier (Cinema 4D defaults to cm; 100 = 100 cm sphere)" style="width:60px"/>
+    <span class="unit"></span>
+  </div>
+  <div class="row" style="gap:4px"><span class="lbl">obj illum:</span>
+    <select id="exportIllum" title="MTL illumination model: 1 = no specular (cleanest for flag textures), 2 = with specular">
+      <option value="1" selected>1 (matte)</option>
+      <option value="2">2 (specular)</option>
+    </select>
+  </div>
+</div>
+
+<!-- Flag panel — global UV transforms + per-cell selection / overrides.
+     Click a hex cell in the 3D view to populate the per-cell section. -->
+<div id="flagControls">
+  <div class="row">
+    <span class="lbl">fit:</span>
+    <select id="flagFit" title="cover crops the flag; extend keeps native aspect and clamps the edge across the rest of the cell">
+      <option value="cover" selected>cover (crop)</option>
+      <option value="extend">extend (clamp edge)</option>
+    </select>
+  </div>
+  <div class="row">
+    <span class="lbl">all rot:</span>
+    <input id="globalFlagRotateRange" type="range" min="-180" max="180" step="1" value="0" />
+    <input id="globalFlagRotate" type="number" step="1" value="0" />
+    <span class="unit">°</span>
+  </div>
+  <div class="row">
+    <span class="lbl">all scl:</span>
+    <input id="globalFlagScaleRange" type="range" min="50" max="200" step="1" value="100" />
+    <input id="globalFlagScale" type="number" step="1" value="100" />
+    <span class="unit">%</span>
+  </div>
+  <div class="section">cell <span id="cellSel">(click a cell)</span></div>
+  <div class="row">
+    <span class="lbl">flag:</span>
+    <select id="cellFlag" disabled><option value="">—</option></select>
+  </div>
+  <div class="row">
+    <span class="lbl">rot:</span>
+    <button id="cellRotMinus" type="button" style="background:#222;color:#fff;border:1px solid #555;padding:1px 6px;cursor:pointer" title="rotate -30°" disabled>−30°</button>
+    <input id="cellRot" type="number" step="30" value="0" disabled />
+    <button id="cellRotPlus" type="button" style="background:#222;color:#fff;border:1px solid #555;padding:1px 6px;cursor:pointer" title="rotate +30°" disabled>+30°</button>
+    <span class="unit">°</span>
+  </div>
+  <div class="row">
+    <span class="lbl">scale:</span>
+    <input id="cellScaleRange" type="range" min="25" max="300" step="1" value="100" disabled />
+    <input id="cellScale" type="number" step="5" value="100" disabled />
+    <span class="unit">%</span>
+  </div>
+  <div class="row">
+    <button id="cellReset" type="button" style="background:#222;color:#fff;border:1px solid #555;padding:2px 8px;cursor:pointer;font:inherit" disabled>reset</button>
+    <span class="hint">click background to deselect</span>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "mp4-muxer": "https://esm.sh/mp4-muxer@5.2.2"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ConvexHull } from 'three/addons/math/ConvexHull.js';
+// MP4 turntable export — WebCodecs encoder + mp4-muxer wrapper.
+// Pulled in lazily inside exportMP4() so the import isn't required for normal use.
+
+// ---------- scene ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(0, 0, 3.6);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+// Shadows are configured per-render based on the lit toggle (see applyLitMode below).
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.rotateSpeed = 0.6;
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// Lights — always in the scene; they only affect MeshStandardMaterial (the "lit" path).
+// Hemisphere gives a soft sky/ground gradient, directional gives a 3D form.
+const hemiLight = new THREE.HemisphereLight(0xeeeeff, 0x222018, 0.55);
+scene.add(hemiLight);
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
+keyLight.position.set(2.5, 4, 2);
+keyLight.shadow.mapSize.set(2048, 2048);
+// The casting frustum is sized to fit the sphere + a bit of breathing room
+// for extruded cells; matches our RADIUS = 1 convention below.
+keyLight.shadow.camera.left   = -2;
+keyLight.shadow.camera.right  =  2;
+keyLight.shadow.camera.top    =  2;
+keyLight.shadow.camera.bottom = -2;
+keyLight.shadow.camera.near   =  1;
+keyLight.shadow.camera.far    = 12;
+keyLight.shadow.bias = -0.0005;
+keyLight.shadow.normalBias = 0.02;
+scene.add(keyLight);
+scene.add(keyLight.target);
+const fillLight = new THREE.DirectionalLight(0xa8c0ff, 0.25);
+fillLight.position.set(-2, -1, -2);
+scene.add(fillLight);
+
+// ---------- "Infinity plane" backdrop ----------
+// A large enclosing sphere drawn on its inside (BackSide) gives a smooth horizonless
+// gradient — a soft "studio cyclorama" feel. Plus a horizontal floor that ONLY shows
+// the shadow (transparent everywhere else), so the sphere appears to sit on the
+// gradient. Both are toggled by the "lit" checkbox.
+const BACKDROP_RADIUS = 18;
+const FLOOR_Y = -1.45;
+const backdropMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  depthWrite: false,
+  uniforms: {
+    topColor:    { value: new THREE.Color(0x222630) },
+    bottomColor: { value: new THREE.Color(0x07080b) },
+    radius:      { value: BACKDROP_RADIUS },
+  },
+  vertexShader: `
+    varying vec3 vWorld;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorld = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vWorld;
+    uniform vec3 topColor;
+    uniform vec3 bottomColor;
+    uniform float radius;
+    void main() {
+      // Smooth gradient based on world-Y, biased so the horizon sits a little
+      // below centre (matches a typical studio cyc lamp setup).
+      float t = clamp(vWorld.y / radius * 0.5 + 0.55, 0.0, 1.0);
+      // Power curve gives a subtle exponential roll-off rather than a linear band.
+      vec3 col = mix(bottomColor, topColor, pow(t, 0.85));
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+const backdropMesh = new THREE.Mesh(new THREE.SphereGeometry(BACKDROP_RADIUS, 32, 24), backdropMat);
+backdropMesh.renderOrder = -1;
+backdropMesh.visible = false;
+scene.add(backdropMesh);
+
+const floorMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.ShadowMaterial({ opacity: 0.42, transparent: true })
+);
+floorMesh.rotation.x = -Math.PI / 2;
+floorMesh.position.y = FLOOR_Y;
+floorMesh.receiveShadow = true;
+floorMesh.visible = false;
+scene.add(floorMesh);
+
+// Toggle scene visuals + renderer shadow flag for the lit path.
+function applyLitMode(lit) {
+  renderer.shadowMap.enabled = lit;
+  scene.background = lit ? null : new THREE.Color(0x000000);
+  backdropMesh.visible = lit;
+  floorMesh.visible = lit;
+  keyLight.castShadow = lit;
+}
+
+// Track generated objects so we can clear them on rebuild
+const sphereObjects = [];
+function clearSphere() {
+  for (const o of sphereObjects) {
+    scene.remove(o);
+    o.geometry?.dispose();
+    o.material?.dispose();
+  }
+  sphereObjects.length = 0;
+}
+
+// ---------- Flag library (48 worldcup flags) ----------
+const FLAG_DIR = 'flags/worldcup-flags/';
+const FLAG_FILES = [
+  'algeria.png','argentina.png','australia.png','austria.png',
+  'belgium.png','bosnia-and-herzegovina.png','brazil.png','cabo-verde.png',
+  'canada.png','colombia.png','congo-dr.png','cote-divoire.png',
+  'croatia.png','curacao.png','czechia.png','ecuador.png',
+  'egypt.png','england.png','france.png','germany.png',
+  'ghana.png','haiti.png','iran.png','iraq.png',
+  'japan.png','jordan.png','korea-republic.png','mexico.png',
+  'morocco.png','netherlands.png','new-zealand.png','norway.png',
+  'panama.png','paraguay.png','portugal.png','qatar.png',
+  'saudi-arabia.png','scotland.png','senegal.png','south-africa.png',
+  'spain.png','sweden.png','switzerland.png','tunisia.png',
+  'turkiye.png','uruguay.png','usa.png','uzbekistan.png',
+];
+// Material name used in OBJ/MTL — derived from filename (no extension)
+const flagName = i => FLAG_FILES[i].replace(/\.[^.]+$/, '');
+
+// Per-flag aspect ratios (image width / height), populated after textures load.
+// Default 1.5 (3:2 — most common national flag ratio) for cells built before load.
+let flagAspects = new Array(48).fill(1.5);
+
+// Rotation applied to UV basis on every cell (degrees, CCW around cell centre).
+const FLAG_ROTATION_DEG = 30;
+
+// Async-load all flag textures up front. Cached for re-use across builds.
+// `flagsLoadedPromise` lets gating code (rebuild button, MP4 export) wait for
+// the full set rather than rendering placeholder greys mid-build.
+let flagTextures = null;
+let flagsReady = false;
+const loadingEl = document.getElementById('loading');
+function setLoadingProgress(loaded, total, failed) {
+  if (!loadingEl) return;
+  if (loaded >= total) {
+    if (failed > 0) {
+      loadingEl.textContent = `loaded ${total - failed}/${total} flags (${failed} failed)`;
+      // Still hide after a brief flash so the UI isn't blocked
+      setTimeout(() => loadingEl.classList.add('done'), 1500);
+    } else {
+      loadingEl.classList.add('done');
+    }
+  } else {
+    loadingEl.textContent = `loading flags ${loaded}/${total}…`;
+  }
+}
+const flagsLoadedPromise = (async () => {
+  const loader = new THREE.TextureLoader();
+  let loaded = 0, failed = 0;
+  const tasks = FLAG_FILES.map((f, i) => new Promise((res) => {
+    loader.load(FLAG_DIR + f, t => {
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.minFilter = THREE.LinearFilter;
+      t.magFilter = THREE.LinearFilter;
+      // Edge clamp is critical for the "extend" fit mode — UVs may go outside [0,1]
+      // and we want the sampled colour to be the flag's edge pixel, not a wrapped
+      // copy of the opposite side.
+      t.wrapS = THREE.ClampToEdgeWrapping;
+      t.wrapT = THREE.ClampToEdgeWrapping;
+      t.anisotropy = 4;
+      const w = t.image?.naturalWidth || t.image?.width;
+      const h = t.image?.naturalHeight || t.image?.height;
+      if (w && h) flagAspects[i] = w / h;
+      loaded++;
+      setLoadingProgress(loaded, FLAG_FILES.length, failed);
+      res(t);
+    }, undefined, () => {
+      console.warn('Failed to load', FLAG_FILES[i]);
+      loaded++; failed++;
+      setLoadingProgress(loaded, FLAG_FILES.length, failed);
+      res(null);
+    });
+  }));
+  flagTextures = await Promise.all(tasks);
+  flagsReady = true;
+  console.log(`Loaded ${flagTextures.filter(Boolean).length}/${flagTextures.length} flag textures`);
+  // If a build already ran with placeholder grey, rebuild now that textures exist.
+  if (typeof window.__lastHex === 'number') build(window.__lastHex);
+})();
+
+// Compute UV mapping for a cell so a flag image is shown on it.
+//
+// Two fit modes:
+//   'cover'  — flag aspect is preserved, scaled UP to fill the cell bbox; the
+//              long axis gets cropped. UVs stay inside [0,1] — original behaviour.
+//   'extend' — flag aspect is preserved, scaled to FIT inside the cell bbox; the
+//              short axis sees UVs outside [0,1] and the texture's ClampToEdge
+//              wrap repeats the flag's edge pixel across that area. Looks cleanest
+//              when the flag has a flat-coloured border. (icosa-flag-mapper.html
+//              uses the same edge-clamp trick on a 2D canvas.)
+//
+// `transform` is an optional per-cell UV transform (rotation, uniform scale)
+// applied around the cell centre AFTER aspect mapping. Used for per-cell
+// overrides + the global flag rotate/scale knobs.
+//
+// The flag's bottom edge is aligned to the cell edge most "world-down", then the
+// basis is rotated by (FLAG_ROTATION_DEG + transform.rotateDeg) and scaled by
+// transform.scale before sampling, all around the cell centre.
+//
+// Returns { uvs: [{u,v}], uvCenter: {u,v}, edgeIdx: number }.
+function computeCellUV(cellVertIdx, vVerts, flagAspect = 1.5, fitMode = 'cover', transform = null) {
+  const verts = cellVertIdx.map(i => vVerts[i]);
+  const N = verts.length;
+
+  const center = new THREE.Vector3();
+  for (const v of verts) center.add(v);
+  center.divideScalar(N).normalize();
+
+  // Tangent-plane "down" = project world -Y onto tangent plane at center
+  const worldDown = new THREE.Vector3(0, -1, 0);
+  let tangentDown = worldDown.clone().addScaledVector(center, -worldDown.dot(center));
+  if (tangentDown.lengthSq() < 1e-6) {
+    const fb = new THREE.Vector3(1, 0, 0);
+    tangentDown = fb.clone().addScaledVector(center, -fb.dot(center));
+  }
+  tangentDown.normalize();
+
+  let bestEdge = 0, bestDot = -Infinity;
+  for (let i = 0; i < N; i++) {
+    const mid = verts[i].clone().add(verts[(i + 1) % N]).multiplyScalar(0.5);
+    const dir = mid.clone().sub(center).normalize();
+    const d = dir.dot(tangentDown);
+    if (d > bestDot) { bestDot = d; bestEdge = i; }
+  }
+
+  // Local 2D basis: x along chosen edge (start→end), y perpendicular into cell
+  const eA = verts[bestEdge], eB = verts[(bestEdge + 1) % N];
+  let xLocal = eB.clone().sub(eA);
+  xLocal.addScaledVector(center, -xLocal.dot(center)).normalize();
+  let yLocal = new THREE.Vector3().crossVectors(center, xLocal).normalize();
+  const edgeMid = eA.clone().add(eB).multiplyScalar(0.5);
+  if (yLocal.dot(center.clone().sub(edgeMid)) < 0) yLocal.negate();
+
+  // Rotate the basis. Base rotation = FLAG_ROTATION_DEG; per-cell + global add on top.
+  const transRotDeg = transform ? (transform.rotateDeg || 0) : 0;
+  const rot = (FLAG_ROTATION_DEG + transRotDeg) * Math.PI / 180;
+  const cR = Math.cos(rot), sR = Math.sin(rot);
+  const xRot = xLocal.clone().multiplyScalar(cR).addScaledVector(yLocal, sR);
+  const yRot = xLocal.clone().multiplyScalar(-sR).addScaledVector(yLocal, cR);
+  xLocal = xRot;
+  yLocal = yRot;
+
+  // Project verts to 2D (center at origin)
+  const verts2d = verts.map(v => {
+    const o = v.clone().sub(center);
+    return [o.dot(xLocal), o.dot(yLocal)];
+  });
+
+  let minX = 0, maxX = 0, minY = 0, maxY = 0;
+  for (const [x, y] of verts2d) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  const w = maxX - minX || 1, h = maxY - minY || 1;
+  const hexAspect = w / h;
+
+  // Aspect-fit. Cover: flag *covers* the cell — UVs stay inside [0,1] and the long
+  // axis crops. Extend: flag *fits inside* the cell — UVs may go outside [0,1] and
+  // the texture's edge clamp paints the flag's border colour into the empty area.
+  let uScale, vScale;
+  if (fitMode === 'extend') {
+    if (flagAspect > hexAspect) { uScale = 1.0;                   vScale = flagAspect / hexAspect; }
+    else                        { uScale = hexAspect / flagAspect; vScale = 1.0;                   }
+  } else {
+    if (flagAspect > hexAspect) { uScale = hexAspect / flagAspect; vScale = 1.0;                   }
+    else                        { uScale = 1.0;                    vScale = flagAspect / hexAspect; }
+  }
+
+  // Per-cell + global "scale" knob: scale the UV-space size of the cell. scale > 1
+  // makes the flag appear larger (UVs cover less of [0,1]); scale < 1 zooms out.
+  // We achieve "flag larger" by SHRINKING uScale/vScale (UVs sample a narrower window
+  // of the texture, magnifying it on the cell). scale = 1 → unchanged.
+  const sFactor = transform && transform.scale > 0 ? transform.scale : 1;
+  uScale /= sFactor;
+  vScale /= sFactor;
+
+  const uOff = (1 - uScale) / 2;
+  const vOff = (1 - vScale) / 2;
+
+  // Tiny inset so the "extend" mode skips a 1-pixel anti-aliased border that some
+  // flag PNGs have (otherwise the stretched edge takes on that border's colour and
+  // produces a dark hairline). Same trick as icosa-flag-mapper.html. Cosmetic only;
+  // for "cover" mode where UVs are inside [0,1] this is a no-op visual difference.
+  const EDGE_INSET = fitMode === 'extend' ? 0.005 : 0;
+  const mapUV = (x, y) => {
+    const u0 = uOff + uScale * (x - minX) / w;
+    const v0 = vOff + vScale * (y - minY) / h;
+    // Pull the [0,1]-clamped portion 1% inward so the edge pixel sampled by the
+    // clamp comes from inside the flag image, not its anti-aliased PNG border.
+    const u = EDGE_INSET ? EDGE_INSET + (1 - 2 * EDGE_INSET) * u0 : u0;
+    const v = EDGE_INSET ? EDGE_INSET + (1 - 2 * EDGE_INSET) * v0 : v0;
+    return { u, v };
+  };
+
+  const uvs = verts2d.map(([x, y]) => mapUV(x, y));
+  const uvCenter = mapUV(0, 0);
+  return { uvs, uvCenter, edgeIdx: bestEdge };
+}
+
+// Deterministic shuffle of 0..n-1 using mulberry32
+function shuffledIndices(n, seed) {
+  const arr = Array.from({ length: n }, (_, i) => i);
+  const rng = mulberry32(seed);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Build per-cell geometry as a unified pipeline.
+//
+//   chamfer        ─ replaces each cell vertex with a small bevel edge (perim grows from N to 2N verts)
+//   extrude        ─ translates the cell along its own normal; original perimeter stays at the sphere
+//                    so adjacent cells separate at their shared edges (face-extrude, not vertex-radial)
+//     extrudeScale ─ lateral scale of the extruded top relative to the base (1.0 = vertical walls)
+//     extrudeSub   ─ number of intermediate rings inside the side-wall (0 = single-strip)
+//   inset          ─ shrinks the top toward the cell centre by `reach` over `subdiv+1` divisions,
+//                    with `height` raising the inner cap and `curve` shaping the rise profile
+//
+// UVs are preserved at every step: chamfer interpolates between adjacent perim UVs; the inset rings
+// lerp toward `uvCenter` by the same amount as their lateral shrink.
+function buildCellGeometry(cell, vVerts, uvData, opts) {
+  const {
+    chamfer = 0, chamferSub = 0,
+    extrude = 0, extrudeScale = 1, extrudeSub = 0,
+    reach = 0, subdiv = 0, height = 0, curve = 0,
+    triangulate,
+  } = opts;
+
+  // ---- 1. Build the perimeter (with optional chamfer) ----
+  // After chamfer, each original vertex becomes a "block" of (chamferSub + 2) chamfered
+  // perim verts: A[i] (chamfer toward prev), chamferSub Bezier intermediates, B[i] (chamfer
+  // toward next). Block size is the same per-cell so we can detect "within-block" edges
+  // (chamfer bevel side walls) vs "between-block" edges (original cell-edge walls) later.
+  let perim = cell.map(i => vVerts[i].clone());
+  let perimUVs = uvData.uvs.map(u => ({ u: u.u, v: u.v }));
+  const isChamfered = chamfer > 0.001;
+  const blockSize = isChamfered ? (chamferSub + 2) : 1;
+
+  if (isChamfered) {
+    const N0 = perim.length;
+    const cp = [], cu = [];
+    for (let i = 0; i < N0; i++) {
+      const prev = (i - 1 + N0) % N0;
+      const next = (i + 1) % N0;
+      const V = perim[i], Vuv = perimUVs[i];
+      const A = V.clone().lerp(perim[prev], chamfer);
+      const Auv = {
+        u: Vuv.u * (1 - chamfer) + perimUVs[prev].u * chamfer,
+        v: Vuv.v * (1 - chamfer) + perimUVs[prev].v * chamfer,
+      };
+      const B = V.clone().lerp(perim[next], chamfer);
+      const Buv = {
+        u: Vuv.u * (1 - chamfer) + perimUVs[next].u * chamfer,
+        v: Vuv.v * (1 - chamfer) + perimUVs[next].v * chamfer,
+      };
+      // Push A, then chamferSub Bezier intermediates with control point at V, then B
+      cp.push(A); cu.push(Auv);
+      for (let s = 1; s <= chamferSub; s++) {
+        const t = s / (chamferSub + 1);
+        const omt = 1 - t;
+        const wA = omt * omt, wV = 2 * omt * t, wB = t * t;
+        const P = A.clone().multiplyScalar(wA)
+          .addScaledVector(V, wV).addScaledVector(B, wB);
+        cp.push(P);
+        cu.push({
+          u: Auv.u * wA + Vuv.u * wV + Buv.u * wB,
+          v: Auv.v * wA + Vuv.v * wV + Buv.v * wB,
+        });
+      }
+      cp.push(B); cu.push(Buv);
+    }
+    perim = cp; perimUVs = cu;
+  }
+  const N = perim.length;
+
+  // Cell center & mean radius (computed from the chamfered perim)
+  const center = new THREE.Vector3();
+  for (const v of perim) center.add(v);
+  center.divideScalar(N).normalize();
+  let avgR = 0;
+  for (const v of perim) avgR += v.distanceTo(center);
+  avgR /= N;
+
+  const extrudeAmp = extrude * avgR;
+  const heightAmp = height * avgR;
+  const eScale = extrudeScale;
+
+  const hasExtrude = Math.abs(extrudeAmp) > 1e-4 || Math.abs(eScale - 1) > 1e-3;
+  const hasInset = reach > 0.005 || Math.abs(height) > 1e-3;
+
+  // Curve → power-law exponent
+  const q = Math.pow(2, -2 * curve);
+
+  // ---- 2. Determine the ring layout ----
+  // Extrude phase contributes (extrudeSub+1) "unique" rings: base + (extrudeSub) intermediates.
+  // The TOP of extrude == ring 0 of the inset phase, so it's not duplicated.
+  const numExtrudeRings = hasExtrude ? extrudeSub + 1 : 0;
+  // Inset phase: subdiv+2 rings (top + subdiv intermediates + inner) when active, else 1 (just the top).
+  const numInsetRings = hasInset ? subdiv + 2 : 1;
+  const totalRings = numExtrudeRings + numInsetRings;
+
+  const verts = [];
+  const uvs = [];
+  const faces = [];
+  const sideFaces = [];     // edge walls — between original cell-edge perim verts
+  const chamferFaces = [];  // chamfer-bevel walls — between within-block perim verts
+
+  // ---- 3. Generate every ring ----
+  for (let r = 0; r < totalRings; r++) {
+    let lateralFactor; // scaling factor along (perim → center): 1 = full perim, 0 = at centre
+    let heightOff;     // displacement along cell normal
+    let shrink;        // 0..reach — how far the inset has pulled this ring toward centre
+
+    if (r < numExtrudeRings) {
+      // Extrude phase, ring r out of (extrudeSub+1) divisions to the top
+      const t_e = r / (extrudeSub + 1);
+      lateralFactor = 1 + t_e * (eScale - 1);    // 1 at base, eScale just before the top
+      heightOff = t_e * extrudeAmp;
+      shrink = 0;
+    } else {
+      // Inset phase
+      const k_i = r - numExtrudeRings;
+      const insetDivs = numInsetRings - 1;
+      const t_i = insetDivs === 0 ? 0 : k_i / insetDivs;
+      const profile = Math.pow(t_i, q);
+      shrink = t_i * reach;
+      heightOff = (hasExtrude ? extrudeAmp : 0) + heightAmp * profile;
+      // Inset starts from the extruded top, so the lateral factor is eScale before any shrink
+      lateralFactor = (hasExtrude ? eScale : 1);
+    }
+
+    // Combined lateral scale: extrude scale × (1 − shrink)
+    const lf = lateralFactor * (1 - shrink);
+    for (let i = 0; i < N; i++) {
+      const lateral = perim[i].clone().multiplyScalar(lf).addScaledVector(center, 1 - lf);
+      // Re-project to the sphere (the lerp lies inside the chord), then offset along the cell normal
+      lateral.normalize().multiplyScalar(RADIUS).addScaledVector(center, heightOff);
+      verts.push(lateral);
+      uvs.push({
+        u: perimUVs[i].u * (1 - shrink) + uvData.uvCenter.u * shrink,
+        v: perimUVs[i].v * (1 - shrink) + uvData.uvCenter.v * shrink,
+      });
+    }
+  }
+
+  const idx = (r, i) => r * N + i;
+
+  // ---- 4. Side-wall faces (extrude phase) ----
+  // Each perim edge becomes a side-wall strip. We tag whether it's a chamfer-bevel
+  // edge (within a chamfer block — chamferSub + 1 such edges per block) or an original
+  // cell-edge (the single edge between adjacent blocks). This lets the renderer apply
+  // different materials to each.
+  for (let r = 0; r < numExtrudeRings; r++) {
+    for (let i = 0; i < N; i++) {
+      const ni = (i + 1) % N;
+      // Edge from perim[i] to perim[ni]: chamfer iff i is NOT the last vert of its block.
+      const isChamferEdge = isChamfered && (i % blockSize !== blockSize - 1);
+      const target = isChamferEdge ? chamferFaces : sideFaces;
+      if (triangulate) {
+        target.push([idx(r, i), idx(r, ni), idx(r + 1, ni)]);
+        target.push([idx(r, i), idx(r + 1, ni), idx(r + 1, i)]);
+      } else {
+        target.push([idx(r, i), idx(r, ni), idx(r + 1, ni), idx(r + 1, i)]);
+      }
+    }
+  }
+
+  // ---- 5. Top faces (inset phase, between consecutive inset rings) ----
+  for (let r = numExtrudeRings; r < totalRings - 1; r++) {
+    for (let i = 0; i < N; i++) {
+      const ni = (i + 1) % N;
+      if (triangulate) {
+        faces.push([idx(r, i), idx(r, ni), idx(r + 1, ni)]);
+        faces.push([idx(r, i), idx(r + 1, ni), idx(r + 1, i)]);
+      } else {
+        faces.push([idx(r, i), idx(r, ni), idx(r + 1, ni), idx(r + 1, i)]);
+      }
+    }
+  }
+
+  // ---- 6. Cap face (top n-gon) ----
+  // Skip only when `reach` reaches the centre exactly — then all inner verts collapse and the
+  // last ring transition has already produced fan triangles.
+  const capRing = totalRings - 1;
+  if (!(hasInset && reach > 0.999)) {
+    const capHeight = (hasExtrude ? extrudeAmp : 0) + heightAmp;
+    if (triangulate) {
+      const cc = center.clone().multiplyScalar(RADIUS).addScaledVector(center, capHeight);
+      verts.push(cc);
+      uvs.push({ u: uvData.uvCenter.u, v: uvData.uvCenter.v });
+      const ci = verts.length - 1;
+      for (let i = 0; i < N; i++) faces.push([ci, idx(capRing, i), idx(capRing, (i + 1) % N)]);
+    } else {
+      const cap = [];
+      for (let i = 0; i < N; i++) cap.push(idx(capRing, i));
+      faces.push(cap);
+    }
+  }
+
+  return { verts, uvs, faces, sideFaces, chamferFaces, blockSize };
+}
+
+// Build filler triangles at every Voronoi vertex (each shared by 3 cells). When chamfer > 0
+// the cells leave a small triangular gap there; we close it by fanning from the vertex
+// position on the sphere through each cell's chamfer-block perimeter (which already
+// includes any chamferSub Bezier intermediates). Output is one mesh in world space.
+function buildFillerTriangles(cellInfo, cellGeoms) {
+  // vvIdx -> [{ ci, perimIdx }, ...] (always 3 entries for valid Voronoi vertices)
+  const vvToCells = new Map();
+  cellInfo.forEach((c, ci) => {
+    c.cell.forEach((vvIdx, perimIdx) => {
+      if (!vvToCells.has(vvIdx)) vvToCells.set(vvIdx, []);
+      vvToCells.get(vvIdx).push({ ci, perimIdx });
+    });
+  });
+
+  const verts = [];
+  const tris = [];
+  vvToCells.forEach((entries, vvIdx) => {
+    if (entries.length !== 3) return;
+    // Use cellGeoms[entries[0].ci]'s blockSize — same for every cell in a build
+    const blockSize = cellGeoms[entries[0].ci].blockSize ?? 1;
+    if (blockSize < 2) return; // no chamfer → no holes → no filler
+
+    // Center: the Voronoi vertex on the sphere (where the 3 cells "would" meet)
+    const centerPos = cellInfo[entries[0].ci].center.clone(); // wrong — need vvIdx pos
+    // Actually we need vVerts[vvIdx], which we get from any cell's perim (un-chamfered):
+    // but cellInfo doesn't store vVerts directly. We'll derive it from the average of
+    // the chamfer block's first vertex (A) of each cell — they're all on the sphere
+    // surface near the original V, so their average normalised gives V's direction.
+    const avg = new THREE.Vector3();
+    for (const { ci, perimIdx } of entries) {
+      const blockStart = perimIdx * blockSize;
+      avg.add(cellGeoms[ci].verts[blockStart]);
+      avg.add(cellGeoms[ci].verts[blockStart + blockSize - 1]);
+    }
+    avg.normalize().multiplyScalar(RADIUS);
+    const ci0 = verts.length;
+    verts.push(avg);
+
+    // Fan from the centre through each cell's chamfer block (in CCW order around V).
+    // Within the block: A → intermediates → B. Each consecutive pair forms one fan
+    // triangle with the centre.
+    for (const { ci, perimIdx } of entries) {
+      const g = cellGeoms[ci];
+      const blockStart = perimIdx * blockSize;
+      for (let k = 0; k < blockSize - 1; k++) {
+        const a = g.verts[blockStart + k];
+        const b = g.verts[blockStart + k + 1];
+        const ai = verts.length; verts.push(a.clone());
+        const bi = verts.length; verts.push(b.clone());
+        tris.push([ci0, ai, bi]);
+      }
+    }
+  });
+  return { verts, tris };
+}
+
+// Greedy max-min flag assignment.
+// Visits hex cells in shuffled order. For each cell, picks a flag that:
+//   1. has been used fewer than ceil(hexCount / flagCount) times (so usage stays even), and
+//   2. maximises the angular distance from this cell to that flag's nearest existing instance.
+// First 48 cells get unique flags; subsequent cells pick repeats whose existing copies are
+// furthest away on the sphere. Returns parallel array: assignment[i] = flagIdx for hexCells[i].
+function assignFlagsSpaced(hexCells, flagCount, seed) {
+  const N = hexCells.length;
+  const maxUses = Math.ceil(N / flagCount);
+  const positions = hexCells.map(c => c.center);
+  const flagUsage = Array.from({ length: flagCount }, () => []);
+  const cellOrder = shuffledIndices(N, seed);
+  const flagPref = shuffledIndices(flagCount, seed + 1);
+  const assignment = new Array(N);
+
+  for (const ci of cellOrder) {
+    const ciPos = positions[ci];
+    let bestFlag = -1, bestScore = -Infinity;
+    for (const fi of flagPref) {
+      if (flagUsage[fi].length >= maxUses) continue;
+      let score;
+      if (flagUsage[fi].length === 0) {
+        score = Infinity; // unused flag — always preferred
+      } else {
+        let minDist = Infinity;
+        for (const ck of flagUsage[fi]) {
+          const dot = Math.max(-1, Math.min(1, ciPos.dot(positions[ck])));
+          const a = Math.acos(dot);
+          if (a < minDist) minDist = a;
+        }
+        score = minDist;
+      }
+      if (score > bestScore) { bestScore = score; bestFlag = fi; }
+    }
+    assignment[ci] = bestFlag;
+    flagUsage[bestFlag].push(ci);
+  }
+  return assignment;
+}
+
+function circumcenter(a, b, c) {
+  const ab = new THREE.Vector3().subVectors(b, a);
+  const ac = new THREE.Vector3().subVectors(c, a);
+  const n = new THREE.Vector3().crossVectors(ab, ac).normalize();
+  if (n.dot(a) < 0) n.negate();
+  return n;
+}
+
+// ---------- 2a. Thomson repulsion (charged particles on the sphere) ----------
+// Empirically (see hex-test/) this is FAR more reliable than Lloyd for getting
+// exactly 12 pentagons + zero heptagons. Pairwise 1/r repulsion with adaptive step.
+function thomsonRelax(points, { maxIter = 600, tol = 1e-7, stepSize = 0.05 } = {}) {
+  let step = stepSize;
+  let prevEnergy = Infinity;
+  const tmp = new THREE.Vector3();
+  for (let iter = 0; iter < maxIter; iter++) {
+    const forces = points.map(() => new THREE.Vector3());
+    let energy = 0;
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        tmp.subVectors(points[i], points[j]);
+        const r2 = tmp.lengthSq();
+        const r = Math.sqrt(r2);
+        energy += 1 / r;
+        const k = 1 / (r2 * r);
+        forces[i].addScaledVector(tmp, k);
+        forces[j].addScaledVector(tmp, -k);
+      }
+    }
+    let maxDelta = 0;
+    for (let i = 0; i < points.length; i++) {
+      // Project force onto the tangent plane (remove radial component)
+      const radial = forces[i].dot(points[i]);
+      forces[i].addScaledVector(points[i], -radial);
+      const before = points[i].clone();
+      points[i].addScaledVector(forces[i], step).normalize();
+      const d = before.distanceTo(points[i]);
+      if (d > maxDelta) maxDelta = d;
+    }
+    if (energy >= prevEnergy) step *= 0.7; // adaptive: shrink on stall
+    prevEnergy = energy;
+    if (maxDelta < tol) return iter;
+  }
+  return -1;
+}
+
+// Deterministic PRNG so multi-start is reproducible
+function mulberry32(seed) {
+  return () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function seedRandom(N, rng) {
+  const pts = [];
+  for (let i = 0; i < N; i++) {
+    const z = 2 * rng() - 1;
+    const r = Math.sqrt(1 - z * z);
+    const t = 2 * Math.PI * rng();
+    pts.push(new THREE.Vector3(Math.cos(t) * r, z, Math.sin(t) * r));
+  }
+  return pts;
+}
+
+// ---------- 2b. Lloyd relaxation (kept for hex-target relax compatibility) ----------
+function lloydRelax(points, { maxIter = 100, tol = 1e-5, damping = 0.6 } = {}) {
+  for (let iter = 0; iter < maxIter; iter++) {
+    const hull = new ConvexHull().setFromPoints(points);
+    const ptIndex = new Map();
+    points.forEach((p, i) => ptIndex.set(p, i));
+
+    const adjacency = points.map(() => []);
+    for (const face of hull.faces) {
+      if (face.mark !== 0) continue;
+      let edge = face.edge;
+      const tri = [];
+      for (let k = 0; k < 3; k++) { tri.push(ptIndex.get(edge.head().point)); edge = edge.next; }
+      const c = circumcenter(points[tri[0]], points[tri[1]], points[tri[2]]);
+      for (const pi of tri) adjacency[pi].push(c);
+    }
+
+    let maxDelta = 0;
+    for (let i = 0; i < points.length; i++) {
+      if (adjacency[i].length === 0) continue;
+      const sum = new THREE.Vector3();
+      adjacency[i].forEach(v => sum.add(v));
+      sum.divideScalar(adjacency[i].length).normalize();
+      const delta = sum.distanceTo(points[i]);
+      if (delta > maxDelta) maxDelta = delta;
+      points[i].lerp(sum, damping).normalize();
+    }
+    if (maxDelta < tol) {
+      console.log(`Lloyd converged @ iter ${iter}, Δmax=${maxDelta.toExponential(2)}`);
+      return iter;
+    }
+  }
+  console.log(`Lloyd hit maxIter`);
+  return -1;
+}
+
+function buildVoronoi(seedPoints) {
+  const hull = new ConvexHull().setFromPoints(seedPoints);
+  const ptIndex = new Map();
+  seedPoints.forEach((p, i) => ptIndex.set(p, i));
+
+  const faces = [];
+  const pointFaces = seedPoints.map(() => []);
+
+  for (const face of hull.faces) {
+    if (face.mark !== 0) continue;
+    let edge = face.edge;
+    const tri = [];
+    for (let k = 0; k < 3; k++) { tri.push(ptIndex.get(edge.head().point)); edge = edge.next; }
+    const fi = faces.length;
+    faces.push({ pts: tri, center: circumcenter(seedPoints[tri[0]], seedPoints[tri[1]], seedPoints[tri[2]]) });
+    for (const pi of tri) pointFaces[pi].push(fi);
+  }
+
+  const vVerts = faces.map(f => f.center.clone());
+
+  const sortCCW = (faceIdxList, anchor) => {
+    const up = Math.abs(anchor.y) < 0.9 ? new THREE.Vector3(0,1,0) : new THREE.Vector3(1,0,0);
+    const tx = new THREE.Vector3().crossVectors(up, anchor).normalize();
+    const ty = new THREE.Vector3().crossVectors(anchor, tx).normalize();
+    faceIdxList.sort((a, b) => {
+      const va = vVerts[a], vb = vVerts[b];
+      return Math.atan2(va.dot(ty), va.dot(tx)) - Math.atan2(vb.dot(ty), vb.dot(tx));
+    });
+    return faceIdxList;
+  };
+
+  const cells = pointFaces.map((fl, i) => sortCCW(fl.slice(), seedPoints[i]));
+  return { cells, vVerts, sortCCW };
+}
+
+// ---------- 4. Per-cell regular-polygon target relaxation ----------
+// For each cell, fit the best regular N-gon (in tangent plane at cell center)
+// to its current vertices, then push each vertex toward its slot. Vertices
+// shared by multiple cells take the average target. Iterate until Δmax settles.
+//
+// Topology is preserved exactly — we only move existing vertices, never split
+// or merge — so no holes can ever appear.
+function regularPolygonRelax(cells, vVerts, { maxIter = 400, tol = 1e-5, damping = 0.4 } = {}) {
+  let lastDelta = Infinity;
+  for (let iter = 0; iter < maxIter; iter++) {
+    const accum = vVerts.map(() => new THREE.Vector3());
+    const counts = new Array(vVerts.length).fill(0);
+
+    for (const cell of cells) {
+      const N = cell.length;
+
+      // Cell center = mean of its vertex positions, projected to sphere
+      const center = new THREE.Vector3();
+      for (const vi of cell) center.add(vVerts[vi]);
+      center.divideScalar(N).normalize();
+
+      // Tangent basis at center
+      const up = Math.abs(center.y) < 0.9 ? new THREE.Vector3(0,1,0) : new THREE.Vector3(1,0,0);
+      const tx = new THREE.Vector3().crossVectors(up, center).normalize();
+      const ty = new THREE.Vector3().crossVectors(center, tx).normalize();
+
+      // Project current vertices to 2D tangent plane
+      const verts2d = cell.map(vi => {
+        const o = new THREE.Vector3().subVectors(vVerts[vi], center);
+        return [o.dot(tx), o.dot(ty)];
+      });
+
+      // Average radius
+      let R = 0;
+      for (const [x, y] of verts2d) R += Math.hypot(x, y);
+      R /= N;
+
+      // Best-fit rotation φ:
+      //   maximize Σ (V_i · target_i) where target_i = R*(cos(α_i+φ), sin(α_i+φ))
+      //   φ* = atan2( Σ(V_y cos α - V_x sin α), Σ(V_x cos α + V_y sin α) )
+      let A = 0, B = 0;
+      for (let i = 0; i < N; i++) {
+        const a = (2 * Math.PI * i) / N;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        A += verts2d[i][0] * ca + verts2d[i][1] * sa;
+        B += verts2d[i][1] * ca - verts2d[i][0] * sa;
+      }
+      const phi = Math.atan2(B, A);
+
+      // Push each vertex's accumulator toward its slot in this cell's regular N-gon
+      for (let i = 0; i < N; i++) {
+        const a = (2 * Math.PI * i) / N + phi;
+        const target = new THREE.Vector3()
+          .copy(center)
+          .addScaledVector(tx, R * Math.cos(a))
+          .addScaledVector(ty, R * Math.sin(a))
+          .normalize();
+        accum[cell[i]].add(target);
+        counts[cell[i]]++;
+      }
+    }
+
+    let maxDelta = 0;
+    for (let i = 0; i < vVerts.length; i++) {
+      if (counts[i] === 0) continue;
+      const target = accum[i].divideScalar(counts[i]).normalize();
+      const d = target.distanceTo(vVerts[i]);
+      if (d > maxDelta) maxDelta = d;
+      vVerts[i].lerp(target, damping).normalize();
+    }
+
+    if (maxDelta < tol) {
+      console.log(`Hex relax converged @ iter ${iter}, Δmax=${maxDelta.toExponential(2)}`);
+      return iter;
+    }
+    // Bail if we're oscillating (delta not decreasing meaningfully)
+    if (iter > 50 && maxDelta > lastDelta * 0.999) {
+      console.log(`Hex relax stalled @ iter ${iter}, Δmax=${maxDelta.toExponential(2)}`);
+      return iter;
+    }
+    lastDelta = maxDelta;
+  }
+  console.log(`Hex relax hit maxIter`);
+  return -1;
+}
+
+// ---------- 5. Topology computation (no rendering) ----------
+const RADIUS = 1.0;
+const EDGE_LIFT = 1.002;
+const ICOSAHEDRAL_IDEAL = Math.acos(1 / Math.sqrt(5)); // ~63.43° — pentagon spacing on a regular icosahedron
+
+// Compute pentagon distribution stats for a fully-relaxed point set.
+function statsFor(seedPoints, voro) {
+  const { cells } = voro;
+
+  const sideCount = {};
+  for (const c of cells) sideCount[c.length] = (sideCount[c.length] || 0) + 1;
+  const pentagonCount = sideCount[5] || 0;
+  const hexagonCount = sideCount[6] || 0;
+  const nonHexCount = cells.length - hexagonCount;
+
+  // Pentagon centers
+  const pentCenters = [];
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i].length === 5) pentCenters.push(seedPoints[i]);
+  }
+
+  // Pentagon distribution metrics:
+  //   evenness = minPairAngle / icosahedral ideal (≤ 1.0; 1.0 = perfect icosahedron)
+  //   clumping = stddev / mean of nearest-neighbor pentagon distances (0 = perfectly uniform)
+  // Empirically clumping is the more reliable visual evenness metric.
+  let minPair = Infinity;
+  const nearest = [];
+  for (let i = 0; i < pentCenters.length; i++) {
+    let nearI = Infinity;
+    for (let j = 0; j < pentCenters.length; j++) {
+      if (i === j) continue;
+      const a = Math.acos(Math.max(-1, Math.min(1, pentCenters[i].dot(pentCenters[j]))));
+      if (i < j && a < minPair) minPair = a;
+      if (a < nearI) nearI = a;
+    }
+    nearest.push(nearI);
+  }
+  const meanN = nearest.reduce((a,b)=>a+b, 0) / Math.max(1, nearest.length);
+  const varN = nearest.reduce((a,b)=>a+(b-meanN)**2, 0) / Math.max(1, nearest.length);
+  const stdN = Math.sqrt(varN);
+
+  return {
+    seedPoints, voro, sideCount, pentagonCount, hexagonCount, nonHexCount,
+    minPentAngleDeg: pentCenters.length > 1 ? minPair * 180 / Math.PI : 0,
+    evenness: pentCenters.length > 1 ? minPair / ICOSAHEDRAL_IDEAL : 0,
+    clumping: meanN > 0 ? stdN / meanN : 1,
+  };
+}
+
+// Lexicographic comparison: cleanest topology first, then lowest clumping, then highest evenness.
+function isBetter(a, b) {
+  if (!b) return true;
+  if (a.nonHexCount !== b.nonHexCount) return a.nonHexCount < b.nonHexCount;
+  if (a.clumping !== b.clumping) return a.clumping < b.clumping;
+  return a.evenness > b.evenness;
+}
+
+// Single basin-hop run: random start → Thomson → repeated [perturb → Thomson], keep best by `isBetter`.
+// `kickIter` controls the per-kick Thomson budget — fewer iterations = faster, looser pack.
+function basinHopRun(N, rngSeed, kicks = 5, kickMag = 0.10, kickIter = 350) {
+  const rng = mulberry32(rngSeed);
+  const pts = seedRandom(N, mulberry32(rngSeed + 7));
+  thomsonRelax(pts, { maxIter: 600, stepSize: 0.05 });
+  let best = statsFor(pts, buildVoronoi(pts));
+  let bestSnap = pts.map(p => p.clone());
+  for (let k = 0; k < kicks; k++) {
+    const trial = bestSnap.map(p => p.clone());
+    for (const p of trial) {
+      p.x += (rng() - 0.5) * kickMag;
+      p.y += (rng() - 0.5) * kickMag;
+      p.z += (rng() - 0.5) * kickMag;
+      p.normalize();
+    }
+    thomsonRelax(trial, { maxIter: kickIter, stepSize: 0.05 });
+    const cand = statsFor(trial, buildVoronoi(trial));
+    if (isBetter(cand, best)) {
+      best = cand;
+      bestSnap = trial.map(p => p.clone());
+    }
+  }
+  return best;
+}
+
+// Multi-start basin hopping: M independent runs (each its own random start + kicks), return overall best.
+//   Empirically tested in hex-test/test9_compute.mjs across 40-60 hex range.
+//   M=15, k=5 cuts clump_avg from 0.055 (M=25 single Thomson) down to 0.042 — ~24% more uniform.
+//   Runtime ~5x M=25 single Thomson (≈ 90 Thomson evals total per build).
+// `seed` mixes into the per-start RNG so users can re-roll without changing hexCount.
+function findBestTopology(N, { starts = 15, kicks = 5, kickMag = 0.10, kickIter = 350, seed = 0 } = {}) {
+  let best = null;
+  for (let m = 0; m < starts; m++) {
+    const r = basinHopRun(N, N * 9173 + m * 31 + seed * 1031, kicks, kickMag, kickIter);
+    if (isBetter(r, best)) best = r;
+  }
+  return best;
+}
+
+// Holds the latest mesh data so the OBJ export button can serialize without re-computing.
+let lastBuildSnapshot = null;
+
+// Per-cell flag overrides keyed by cell index in the build snapshot. Each entry:
+//   { flagIdx?: number, rotateDeg?: number, scale?: number }
+// Cleared whenever the topology changes (different hex count or seed) since cell
+// indices aren't stable across builds. Live for slider tweaks within one topology.
+let cellOverrides = new Map();
+let selectedCellIdx = null;
+
+// Quality preset → topology search effort. Numbers measured in hex-test/test9_compute.mjs.
+const QUALITY_PRESETS = {
+  fast:     { starts:  8, kicks: 3, kickIter: 250, kickMag: 0.10 }, // ~1s,  clump ~0.06
+  standard: { starts: 15, kicks: 5, kickIter: 350, kickMag: 0.10 }, // ~4s,  clump ~0.04
+  max:      { starts: 30, kicks: 8, kickIter: 500, kickMag: 0.10 }, // ~12s, clump ~0.03
+};
+function getQualityPreset() {
+  const v = document.getElementById('quality')?.value || 'standard';
+  return QUALITY_PRESETS[v] || QUALITY_PRESETS.standard;
+}
+
+// Read the optional ?hex=&seed=&quality= from the URL on first load. Seed is
+// folded into hexCount * 31 + 7 to drive flag assignment, so different seeds
+// give different arrangements at the same hex count.
+const initialUrl = new URL(window.location.href);
+const URL_HEX     = parseInt(initialUrl.searchParams.get('hex') || '', 10);
+const URL_SEED    = parseInt(initialUrl.searchParams.get('seed') || '', 10);
+const URL_QUALITY = initialUrl.searchParams.get('quality');
+let currentSeed = Number.isFinite(URL_SEED) ? URL_SEED : 0;
+function setUrlState(hex, seed) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('hex', String(hex));
+  url.searchParams.set('seed', String(seed));
+  const q = document.getElementById('quality')?.value;
+  if (q && q !== 'standard') url.searchParams.set('quality', q); else url.searchParams.delete('quality');
+  history.replaceState(null, '', url.toString());
+}
+
+// ---------- 6. Build full mesh + render ----------
+function build(hexCount) {
+  window.__lastHex = hexCount;
+  const N = Math.max(20, hexCount + 12);
+
+  const preset = getQualityPreset();
+  const result = findBestTopology(N, { ...preset, seed: currentSeed });
+  const { voro, sideCount, pentagonCount, hexagonCount, nonHexCount, minPentAngleDeg, evenness, clumping } = result;
+  const { cells, vVerts, sortCCW } = voro;
+
+  regularPolygonRelax(cells, vVerts);
+
+  // Re-sort cells now that vertices have moved
+  for (let ci = 0; ci < cells.length; ci++) {
+    const center = new THREE.Vector3();
+    for (const vi of cells[ci]) center.add(vVerts[vi]);
+    center.divideScalar(cells[ci].length).normalize();
+    sortCCW(cells[ci], center);
+  }
+
+  const stats = Object.entries(sideCount).sort().map(([k,v]) => `${v}×${k}-gon`).join(', ');
+  console.log(`Topology: ${stats} | clumping=${clumping.toFixed(4)} | evenness=${evenness.toFixed(3)} | minPent=${minPentAngleDeg.toFixed(1)}°`);
+  document.getElementById('hud').textContent =
+    `drag to rotate · scroll to zoom\n` +
+    `${cells.length} cells: ${stats}\n` +
+    `pentagon clumping: ${clumping.toFixed(4)} (0 = perfectly uniform spacing)\n` +
+    `pentagon evenness: ${evenness.toFixed(3)} (1.0 = ideal icosahedral)\n` +
+    `min pentagon spacing: ${minPentAngleDeg.toFixed(1)}°`;
+
+  // (clearSphere + wireframe + fill rendering all happen in renderSnapshot below)
+
+  // ---- Flag assignment + UV mapping per cell ----
+  // Identify hex cells (length === 6) — these get flags. Pentagons/defects stay dark.
+  const cellInfo = cells.map((cell, idx) => {
+    const center = new THREE.Vector3();
+    for (const vi of cell) center.add(vVerts[vi]);
+    center.divideScalar(cell.length).normalize();
+    return { cell, idx, center, isHex: cell.length === 6 };
+  });
+  const hexCells = cellInfo.filter(c => c.isHex);
+
+  // Greedy max-min spacing: every flag used (nearly) the same number of times, with
+  // any duplicates pushed as far apart on the sphere as possible. Seed mixes hexCount
+  // and the URL-driven currentSeed so re-rolls produce different arrangements.
+  const assignments = assignFlagsSpaced(hexCells, 48, hexCount * 31 + 7 + currentSeed * 9173);
+  hexCells.forEach((c, i) => { c.flagIdx = assignments[i]; });
+  // Apply per-cell flag overrides (set by the cell-edit panel). Topology indices
+  // are stable within a single build, so overrides keyed by cell idx survive
+  // slider tweaks but reset whenever the topology changes.
+  for (const c of cellInfo) {
+    const ov = cellOverrides.get(c.idx);
+    if (ov && Number.isFinite(ov.flagIdx) && c.isHex) c.flagIdx = ov.flagIdx;
+  }
+
+  // Diagnostic: report the closest pair of same-flag cells (lower bound on duplicate spacing)
+  if (hexCells.length > 48) {
+    let minDup = Infinity, dupFlag = -1;
+    const byFlag = new Map();
+    for (const c of hexCells) {
+      if (!byFlag.has(c.flagIdx)) byFlag.set(c.flagIdx, []);
+      byFlag.get(c.flagIdx).push(c);
+    }
+    for (const [fi, group] of byFlag) {
+      if (group.length < 2) continue;
+      for (let a = 0; a < group.length; a++) {
+        for (let b = a + 1; b < group.length; b++) {
+          const dot = Math.max(-1, Math.min(1, group[a].center.dot(group[b].center)));
+          const ang = Math.acos(dot);
+          if (ang < minDup) { minDup = ang; dupFlag = fi; }
+        }
+      }
+    }
+    if (minDup < Infinity) {
+      console.log(`Closest duplicate pair: ${flagName(dupFlag)} @ ${(minDup * 180 / Math.PI).toFixed(1)}°`);
+    }
+  }
+
+  // Per-cell UV mapping. Hex cells use their assigned flag's actual aspect ratio
+  // (loaded from textures, default 1.5 if textures haven't loaded yet) to keep the
+  // flag image undistorted. Pentagons use a default aspect — UVs are unused at render.
+  recomputeCellUVs(cellInfo, vVerts);
+
+  // Stash for export
+  lastBuildSnapshot = { cellInfo, vVerts, hexCount };
+
+  // Push state to the URL so users can share the configuration verbatim.
+  setUrlState(hexCount, currentSeed);
+
+  renderSnapshot();
+  refreshCellPanel();
+}
+
+// Recompute every cell's UV mapping with the current fit mode + global / per-cell
+// transforms. Cheap — pure JS, no texture or buffer churn — so we call it on every
+// flag-control tweak without needing a topology rerun.
+function recomputeCellUVs(cellInfo, vVerts) {
+  const fit = document.getElementById('flagFit')?.value || 'cover';
+  const gRot = parseFloat(document.getElementById('globalFlagRotate')?.value) || 0;
+  const gScl = (parseFloat(document.getElementById('globalFlagScale')?.value) || 100) / 100;
+  for (const c of cellInfo) {
+    const aspect = c.isHex ? flagAspects[c.flagIdx] : 1.5;
+    const ov = cellOverrides.get(c.idx) || {};
+    const transform = {
+      rotateDeg: gRot + (ov.rotateDeg || 0),
+      scale: gScl * (ov.scale ?? 1),
+    };
+    c.uv = computeCellUV(c.cell, vVerts, aspect, fit, transform);
+  }
+}
+
+// Read the current geometry-control inputs as normalised options.
+function getGeomOpts(triangulateOverride) {
+  const num = id => parseInt(document.getElementById(id).value, 10) || 0;
+  const chamfer = Math.min(0.49, Math.max(0, num('chamfer') / 100));
+  const chamferSub = Math.max(0, num('chamferSub'));
+  const extrude = num('extrude') / 100;
+  const extrudeScale = num('extrudeScale') / 100;
+  const extrudeSub = Math.max(0, num('extrudeSub'));
+  const reach = num('inset') / 100;
+  const subdiv = Math.max(0, num('subdivision'));
+  const height = num('height') / 100;
+  const curve = num('curve') / 100;
+  const triangulate = triangulateOverride !== undefined
+    ? triangulateOverride
+    : document.getElementById('triangulate').checked;
+  return { chamfer, chamferSub, extrude, extrudeScale, extrudeSub, reach, subdiv, height, curve, triangulate };
+}
+
+// Re-render the cached topology with current geometry options. Cheap (no Thomson).
+function renderSnapshot() {
+  if (!lastBuildSnapshot) return;
+  const { cellInfo, vVerts } = lastBuildSnapshot;
+  // UV mapping depends on the flag-fit dropdown + global rotate/scale + per-cell
+  // overrides — recompute on every renderSnapshot so flag-panel knobs feel live.
+  recomputeCellUVs(cellInfo, vVerts);
+  const userTriangulate = document.getElementById('triangulate').checked;
+  // Fill geometry must be triangulated (Three.js indices). Wireframe uses the user's
+  // checkbox so n-gons read as clean polygons when triangulate is off.
+  const fillOpts = { ...getGeomOpts(true), triangulate: true };
+  const wireOpts = { ...getGeomOpts(true), triangulate: userTriangulate };
+  const lit = document.getElementById('lit').checked;
+  applyLitMode(lit);
+
+  // Material factory — picks between an unlit basic and a lit standard material.
+  // flatShading on the lit path keeps panel edges crisp instead of smoothing across
+  // shared verts (so extruded side walls read as flat panels, not rounded).
+  const makeMaterial = ({ map = null, color = 0xffffff } = {}) => {
+    if (lit) {
+      return new THREE.MeshStandardMaterial({
+        map, color, side: THREE.DoubleSide,
+        roughness: 0.85, metalness: 0.0, flatShading: true,
+      });
+    }
+    return new THREE.MeshBasicMaterial({ map, color, side: THREE.DoubleSide });
+  };
+  // Tag a mesh so shadow gating + selection-highlight can find it later.
+  const addMesh = (mesh, kind) => {
+    if (lit) { mesh.castShadow = true; mesh.receiveShadow = true; }
+    mesh.userData.kind = kind;
+    scene.add(mesh); sphereObjects.push(mesh);
+  };
+
+  clearSphere();
+
+  const cellGeoms = cellInfo.map(c => buildCellGeometry(c.cell, vVerts, c.uv, fillOpts));
+  const wireGeoms = userTriangulate
+    ? cellGeoms
+    : cellInfo.map(c => buildCellGeometry(c.cell, vVerts, c.uv, wireOpts));
+  const showMeshWireframe = document.getElementById('wireframeMesh').checked;
+
+  // Wireframe is a single master toggle. When unchecked → no wires at all.
+  // When checked → every face edge of the actual rendered mesh, including side walls
+  // (so extrude / inset / subdivision detail is fully visible).
+  if (showMeshWireframe) {
+    const edgePts = [];
+    wireGeoms.forEach(g => {
+      const seen = new Set();
+      const pushFace = f => {
+        for (let i = 0; i < f.length; i++) {
+          const a = f[i], b = f[(i + 1) % f.length];
+          const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          edgePts.push(g.verts[a].clone().multiplyScalar(EDGE_LIFT));
+          edgePts.push(g.verts[b].clone().multiplyScalar(EDGE_LIFT));
+        }
+      };
+      for (const f of g.faces) pushFace(f);
+      for (const f of (g.sideFaces || [])) pushFace(f);
+      for (const f of (g.chamferFaces || [])) pushFace(f);
+    });
+    // Filler triangles — built separately from cellGeoms, so we add their edges here.
+    if (fillOpts.chamfer > 0.001) {
+      const filler = buildFillerTriangles(cellInfo, cellGeoms);
+      for (const t of filler.tris) {
+        for (let i = 0; i < 3; i++) {
+          const a = t[i], b = t[(i + 1) % 3];
+          edgePts.push(filler.verts[a].clone().multiplyScalar(EDGE_LIFT));
+          edgePts.push(filler.verts[b].clone().multiplyScalar(EDGE_LIFT));
+        }
+      }
+    }
+    if (edgePts.length) {
+      const lines = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(edgePts),
+        new THREE.LineBasicMaterial({ color: 0xffffff })
+      );
+      scene.add(lines); sphereObjects.push(lines);
+    }
+  }
+
+  const sideMode = document.getElementById('sideMode').value;     // 'border' | 'flag'
+  const chamferMat = document.getElementById('chamferMat').value; // 'dark' | 'light' | 'flag'
+  const CHAMFER_DARK = 0x0a0a0a;
+  const CHAMFER_LIGHT = 0xeeeeee;
+  const chamferColor = chamferMat === 'light' ? CHAMFER_LIGHT : CHAMFER_DARK;
+
+  // ---- Pentagon dark fill (always includes its own side walls) ----
+  const pentVerts = [], pentIdx = [];
+  cellInfo.forEach((c, ci) => {
+    if (c.isHex) return;
+    const g = cellGeoms[ci];
+    const base = pentVerts.length / 3;
+    for (const v of g.verts) pentVerts.push(v.x, v.y, v.z);
+    for (const f of g.faces) pentIdx.push(base + f[0], base + f[1], base + f[2]);
+    for (const f of (g.sideFaces || [])) pentIdx.push(base + f[0], base + f[1], base + f[2]);
+  });
+  if (pentVerts.length) {
+    const pg = new THREE.BufferGeometry();
+    pg.setAttribute('position', new THREE.Float32BufferAttribute(pentVerts, 3));
+    pg.setIndex(pentIdx);
+    if (lit) pg.computeVertexNormals();
+    const pm = new THREE.Mesh(pg, makeMaterial({ color: 0x0a0a0a }));
+    addMesh(pm, 'pent');
+  }
+
+  // ---- Hex cells: one mesh per flag (per-flag GPU material) ----
+  const hexesByFlag = new Map();
+  for (const c of cellInfo) {
+    if (!c.isHex) continue;
+    if (!hexesByFlag.has(c.flagIdx)) hexesByFlag.set(c.flagIdx, []);
+    hexesByFlag.get(c.flagIdx).push(c);
+  }
+  for (const [flagIdx, group] of hexesByFlag) {
+    const verts = [], uvs = [], indices = [];
+    for (const c of group) {
+      const g = cellGeoms[c.idx];
+      const base = verts.length / 3;
+      for (const v of g.verts) verts.push(v.x, v.y, v.z);
+      for (const uv of g.uvs) uvs.push(uv.u, uv.v);
+      for (const f of g.faces) indices.push(base + f[0], base + f[1], base + f[2]);
+      // Edge side walls — flag stretches up the wall when sideMode === 'flag'
+      if (sideMode === 'flag') {
+        for (const f of (g.sideFaces || [])) indices.push(base + f[0], base + f[1], base + f[2]);
+      }
+      // Chamfer-bevel walls — flag stretches across the bevel when chamferMat === 'flag'
+      if (chamferMat === 'flag') {
+        for (const f of (g.chamferFaces || [])) indices.push(base + f[0], base + f[1], base + f[2]);
+      }
+    }
+    const bg = new THREE.BufferGeometry();
+    bg.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    bg.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    bg.setIndex(indices);
+    if (lit) bg.computeVertexNormals();
+    const tex = flagTextures ? flagTextures[flagIdx] : null;
+    const mat = makeMaterial({ map: tex, color: tex ? 0xffffff : 0x333333 });
+    const mesh = new THREE.Mesh(bg, mat);
+    mesh.userData.flagIdx = flagIdx;
+    addMesh(mesh, 'hexFlag');
+  }
+
+  // ---- Hex side walls (when sideMode === 'border') — single dark-border mesh ----
+  if (sideMode === 'border') {
+    const bv = [], bi = [];
+    for (const c of cellInfo) {
+      if (!c.isHex) continue;
+      const g = cellGeoms[c.idx];
+      if (!g.sideFaces || g.sideFaces.length === 0) continue;
+      const base = bv.length / 3;
+      for (const v of g.verts) bv.push(v.x, v.y, v.z);
+      for (const f of g.sideFaces) bi.push(base + f[0], base + f[1], base + f[2]);
+    }
+    if (bi.length) {
+      const bg = new THREE.BufferGeometry();
+      bg.setAttribute('position', new THREE.Float32BufferAttribute(bv, 3));
+      bg.setIndex(bi);
+      if (lit) bg.computeVertexNormals();
+      const m = new THREE.Mesh(bg, makeMaterial({ color: 0x0a0a0a }));
+      addMesh(m, 'hexBorder');
+    }
+  }
+
+  // ---- Hex chamfer-bevel walls (when chamferMat is 'dark' or 'light') ----
+  if (chamferMat !== 'flag') {
+    const bv = [], bi = [];
+    for (const c of cellInfo) {
+      if (!c.isHex) continue;
+      const g = cellGeoms[c.idx];
+      if (!g.chamferFaces || g.chamferFaces.length === 0) continue;
+      const base = bv.length / 3;
+      for (const v of g.verts) bv.push(v.x, v.y, v.z);
+      for (const f of g.chamferFaces) bi.push(base + f[0], base + f[1], base + f[2]);
+    }
+    if (bi.length) {
+      const bg = new THREE.BufferGeometry();
+      bg.setAttribute('position', new THREE.Float32BufferAttribute(bv, 3));
+      bg.setIndex(bi);
+      if (lit) bg.computeVertexNormals();
+      const m = new THREE.Mesh(bg, makeMaterial({ color: chamferColor }));
+      addMesh(m, 'hexChamfer');
+    }
+  }
+
+  // ---- Filler triangles (close the gap at every Voronoi vertex when chamfer > 0) ----
+  if (fillOpts.chamfer > 0.001) {
+    const filler = buildFillerTriangles(cellInfo, cellGeoms);
+    if (filler.tris.length) {
+      const fv = [];
+      const fi = [];
+      for (const v of filler.verts) fv.push(v.x, v.y, v.z);
+      for (const t of filler.tris) fi.push(t[0], t[1], t[2]);
+      const fg = new THREE.BufferGeometry();
+      fg.setAttribute('position', new THREE.Float32BufferAttribute(fv, 3));
+      fg.setIndex(fi);
+      if (lit) fg.computeVertexNormals();
+      // Filler material: when chamferMat === 'flag' we still need *some* colour because
+      // there's no single flag for a 3-cell junction; fall back to dark.
+      const fillerColor = chamferMat === 'light' ? CHAMFER_LIGHT : CHAMFER_DARK;
+      const fm = new THREE.Mesh(fg, makeMaterial({ color: fillerColor }));
+      addMesh(fm, 'filler');
+    }
+  }
+
+  // ---- Selection highlight ----
+  // Yellow line loop traced along the selected cell's on-sphere perimeter so the
+  // user has visual confirmation of which cell they clicked. Drawn last so it
+  // sits above the geometry; lifted slightly off the sphere to avoid z-fighting.
+  if (selectedCellIdx != null && cellInfo[selectedCellIdx]) {
+    const c = cellInfo[selectedCellIdx];
+    const pts = c.cell.map(i => vVerts[i].clone().multiplyScalar(EDGE_LIFT * 1.01));
+    const loop = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: 0xffcc00 })
+    );
+    loop.userData.kind = 'selection';
+    scene.add(loop); sphereObjects.push(loop);
+  }
+}
+
+// ---------- 7. Range scanner ----------
+function renderScanResults(rows) {
+  const panel = document.getElementById('scanResults');
+  // sort by: fewest non-hex defects, then lowest clumping (most uniform spacing)
+  const sorted = rows.slice().sort((a, b) =>
+    a.nonHex - b.nonHex || a.clumping - b.clumping
+  );
+  const top = sorted.slice(0, 25);
+  const bestNonHex = sorted[0].nonHex;
+  const bestClump = sorted[0].clumping;
+
+  let html = `<div style="margin-bottom:6px;color:#888;">Top 25 / ${rows.length} — sorted by clumping (click to load)</div>`;
+  html += '<table><tr><th>hex</th><th>≠6</th><th>clump</th><th>even</th><th>min°</th></tr>';
+  for (const r of top) {
+    const isBest = r.nonHex === bestNonHex && r.clumping <= bestClump + 0.005;
+    html += `<tr class="${isBest ? 'best' : ''}" data-hex="${r.hex}">` +
+      `<td>${r.hex}</td><td>${r.nonHex}</td>` +
+      `<td>${r.clumping.toFixed(4)}</td>` +
+      `<td>${r.evenness.toFixed(3)}</td><td>${r.minAngle.toFixed(1)}</td></tr>`;
+  }
+  html += '</table>';
+  panel.innerHTML = html;
+  panel.style.display = 'block';
+  panel.querySelectorAll('tr[data-hex]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      document.getElementById('hexCount').value = tr.dataset.hex;
+      build(parseInt(tr.dataset.hex, 10));
+    });
+  });
+}
+
+async function scanRange(minHex, maxHex) {
+  const btn = document.getElementById('scan');
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  const rows = [];
+  for (let h = minHex; h <= maxHex; h++) {
+    btn.textContent = `scanning ${h}/${maxHex}…`;
+    if ((h - minHex) % 3 === 0) await new Promise(r => setTimeout(r, 0));
+    // Cheaper scan settings — good enough to compare counts, not the final result quality.
+    const r = findBestTopology(h + 12, { starts: 6, kicks: 3, kickMag: 0.10 });
+    rows.push({
+      hex: h,
+      pent: r.pentagonCount,
+      nonHex: r.nonHexCount,
+      evenness: r.evenness,
+      clumping: r.clumping,
+      minAngle: r.minPentAngleDeg,
+    });
+  }
+  console.table(rows);
+  renderScanResults(rows);
+  btn.textContent = originalText;
+  btn.disabled = false;
+}
+
+// ---------- OBJ + MTL export ----------
+// Generates a triangulated OBJ with one material per used flag (+ one for pentagons),
+// suitable for import into Cinema 4D. Texture paths are relative to the OBJ file.
+function generateOBJMTL(snapshot) {
+  const { cellInfo, vVerts } = snapshot;
+  // OBJ scale — Cinema 4D defaults to centimetres; a unit-radius sphere comes in as
+  // 1cm. Default 100 makes the export 100cm radius. Read here once.
+  const exportScale = parseFloat(document.getElementById('exportScale')?.value) || 100;
+  // illum: 1 = no specular (cleanest for flag textures), 2 = with specular.
+  const illum = (document.getElementById('exportIllum')?.value || '1');
+
+  const objLines = [
+    '# Hexagonal sphere with world-cup flag textures',
+    '# Generated by hexsphere — gmt-fractals.com',
+    `# scale = ${exportScale}, illum = ${illum}`,
+    'mtllib hexsphere.mtl',
+    'o hexsphere',
+  ];
+  const vLines = [], vtLines = [], vnLines = [];
+
+  // Group hex faces by material name; pentagons under one shared material.
+  const groups = new Map(); // matName -> [ {verts:[i...], vts:[i...], vns:[i...]} per face ]
+  const usedFlagIndices = new Set();
+  let vIdx = 1, vtIdx = 1, vnIdx = 1; // OBJ is 1-indexed
+
+  // Use the same geometry builder as the renderer, with the user's chosen
+  // triangulate setting from the UI checkbox.
+  const opts = getGeomOpts();
+  const sideMode = document.getElementById('sideMode').value;
+  const chamferMat = document.getElementById('chamferMat').value;
+  let usedBorder = false, usedChamferDark = false, usedChamferLight = false, usedFiller = false;
+
+  // Build all cell geometries first so we can use them for filler triangles too
+  const allGeoms = cellInfo.map(c => buildCellGeometry(c.cell, vVerts, c.uv, opts));
+
+  for (let ci = 0; ci < cellInfo.length; ci++) {
+    const c = cellInfo[ci];
+    const isHex = c.isHex;
+    const topMat = isHex ? `flag_${flagName(c.flagIdx)}` : 'pent_dark';
+    const sideMat = isHex
+      ? (sideMode === 'flag' ? topMat : 'extrude_border')
+      : 'pent_dark';
+    // Chamfer wall material: hex follows chamferMat, pent stays pent_dark
+    const chamferMatName = isHex
+      ? (chamferMat === 'flag' ? topMat
+         : chamferMat === 'light' ? 'chamfer_light'
+         : 'chamfer_dark')
+      : 'pent_dark';
+    if (isHex) usedFlagIndices.add(c.flagIdx);
+    if (!groups.has(topMat)) groups.set(topMat, []);
+    if (!groups.has(sideMat)) groups.set(sideMat, []);
+    if (!groups.has(chamferMatName)) groups.set(chamferMatName, []);
+    if (sideMat === 'extrude_border') usedBorder = true;
+    if (chamferMatName === 'chamfer_dark') usedChamferDark = true;
+    if (chamferMatName === 'chamfer_light') usedChamferLight = true;
+
+    const g = allGeoms[ci];
+
+    // Emit this cell's vertices/UVs/normals in OBJ-global indices
+    const cellVi = [], cellVti = [], cellVni = [];
+    for (let i = 0; i < g.verts.length; i++) {
+      const p = g.verts[i];
+      cellVi.push(vIdx++); vLines.push(`v ${(p.x * exportScale).toFixed(6)} ${(p.y * exportScale).toFixed(6)} ${(p.z * exportScale).toFixed(6)}`);
+      const uv = g.uvs[i];
+      cellVti.push(vtIdx++); vtLines.push(`vt ${uv.u.toFixed(6)} ${uv.v.toFixed(6)}`);
+      const n = p.clone().normalize();
+      cellVni.push(vnIdx++); vnLines.push(`vn ${n.x.toFixed(6)} ${n.y.toFixed(6)} ${n.z.toFixed(6)}`);
+    }
+
+    const emit = (faceArr, matName) => {
+      for (const f of (faceArr || [])) {
+        groups.get(matName).push({
+          verts: f.map(i => cellVi[i]),
+          vts:   f.map(i => cellVti[i]),
+          vns:   f.map(i => cellVni[i]),
+        });
+      }
+    };
+    emit(g.faces, topMat);
+    emit(g.sideFaces, sideMat);
+    emit(g.chamferFaces, chamferMatName);
+  }
+
+  // Filler triangles (only when chamfer > 0 — closes the gap at every Voronoi vertex)
+  if (opts.chamfer > 0.001) {
+    const filler = buildFillerTriangles(cellInfo, allGeoms);
+    if (filler.tris.length) {
+      const fillerMatName = chamferMat === 'light' ? 'chamfer_light' : 'chamfer_dark';
+      if (!groups.has(fillerMatName)) groups.set(fillerMatName, []);
+      if (fillerMatName === 'chamfer_dark') usedChamferDark = true;
+      if (fillerMatName === 'chamfer_light') usedChamferLight = true;
+      usedFiller = true;
+      // Emit filler verts (no real UV — point them all at uvCenter (0.5, 0.5))
+      const fStartV = vIdx;
+      for (const v of filler.verts) {
+        vLines.push(`v ${(v.x * exportScale).toFixed(6)} ${(v.y * exportScale).toFixed(6)} ${(v.z * exportScale).toFixed(6)}`);
+        vtLines.push(`vt 0.500000 0.500000`);
+        const n = v.clone().normalize();
+        vnLines.push(`vn ${n.x.toFixed(6)} ${n.y.toFixed(6)} ${n.z.toFixed(6)}`);
+      }
+      const baseV = fStartV, baseVt = vtIdx, baseVn = vnIdx;
+      vIdx += filler.verts.length;
+      vtIdx += filler.verts.length;
+      vnIdx += filler.verts.length;
+      for (const t of filler.tris) {
+        groups.get(fillerMatName).push({
+          verts: [baseV + t[0], baseV + t[1], baseV + t[2]],
+          vts:   [baseVt + t[0], baseVt + t[1], baseVt + t[2]],
+          vns:   [baseVn + t[0], baseVn + t[1], baseVn + t[2]],
+        });
+      }
+    }
+  }
+
+  // Concatenate the buffers in the OBJ-required order (v, vt, vn, then faces grouped by material)
+  objLines.push(...vLines, ...vtLines, ...vnLines);
+  let groupNum = 0;
+  for (const [matName, faces] of groups) {
+    objLines.push(`g group_${++groupNum}`);
+    objLines.push(`usemtl ${matName}`);
+    for (const f of faces) {
+      const parts = f.verts.map((v, i) => `${v}/${f.vts[i]}/${f.vns[i]}`);
+      objLines.push(`f ${parts.join(' ')}`);
+    }
+  }
+
+  // MTL — one material per used flag + pentagon dark
+  const mtlLines = ['# Materials for hexsphere.obj', ''];
+  for (const flagIdx of [...usedFlagIndices].sort((a, b) => a - b)) {
+    const name = flagName(flagIdx);
+    mtlLines.push(
+      `newmtl flag_${name}`,
+      'Ka 1.000 1.000 1.000',
+      'Kd 1.000 1.000 1.000',
+      'Ks 0.000 0.000 0.000',
+      'Ns 10.0',
+      'd 1.0',
+      `illum ${illum}`,
+      `map_Kd ${FLAG_DIR}${FLAG_FILES[flagIdx]}`,
+      ''
+    );
+  }
+  mtlLines.push(
+    'newmtl pent_dark',
+    'Ka 0.020 0.020 0.020',
+    'Kd 0.040 0.040 0.040',
+    'Ks 0.000 0.000 0.000',
+    'Ns 5.0',
+    'd 1.0',
+    'illum 2',
+    ''
+  );
+  if (usedBorder) {
+    mtlLines.push(
+      'newmtl extrude_border',
+      'Ka 0.020 0.020 0.020',
+      'Kd 0.040 0.040 0.040',
+      'Ks 0.000 0.000 0.000',
+      'Ns 5.0',
+      'd 1.0',
+      `illum ${illum}`,
+      ''
+    );
+  }
+  if (usedChamferDark) {
+    mtlLines.push(
+      'newmtl chamfer_dark',
+      'Ka 0.020 0.020 0.020',
+      'Kd 0.040 0.040 0.040',
+      'Ks 0.000 0.000 0.000',
+      'Ns 5.0',
+      'd 1.0',
+      `illum ${illum}`,
+      ''
+    );
+  }
+  if (usedChamferLight) {
+    mtlLines.push(
+      'newmtl chamfer_light',
+      'Ka 0.800 0.800 0.800',
+      'Kd 0.933 0.933 0.933',
+      'Ks 0.000 0.000 0.000',
+      'Ns 10.0',
+      'd 1.0',
+      `illum ${illum}`,
+      ''
+    );
+  }
+
+  return { obj: objLines.join('\n'), mtl: mtlLines.join('\n') };
+}
+
+function downloadFile(filename, content, mime = 'text/plain') {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportOBJ() {
+  if (!lastBuildSnapshot) { alert('Generate the sphere first.'); return; }
+  const { obj, mtl } = generateOBJMTL(lastBuildSnapshot);
+  downloadFile('hexsphere.obj', obj);
+  downloadFile('hexsphere.mtl', mtl);
+  console.log(`Exported hexsphere.obj (${obj.length} chars) + hexsphere.mtl (${mtl.length} chars).` +
+    `\nSave both alongside your "${FLAG_DIR}" folder.`);
+}
+
+// ---------- Turntable MP4 export ----------
+// WebCodecs (browser-native) + mp4-muxer (https://github.com/Vanilagy/mp4-muxer)
+// pulled in lazily on first click so the import doesn't run for users who only
+// export OBJs. Mirrors the lifecycle in dev/engine/export/videoEncoder.ts but
+// with a smaller dependency footprint suitable for an importmap-only standalone.
+let _mp4Cancelled = false;
+async function exportMP4() {
+  const dialog = document.getElementById('mp4Dialog');
+  const status = document.getElementById('mp4Status');
+  const bar    = document.getElementById('mp4Bar');
+  const btnGo  = document.getElementById('mp4Start');
+  const btnX   = document.getElementById('mp4Cancel');
+  status.classList.remove('err');
+  status.textContent = 'click render to start';
+  bar.style.width = '0%';
+  dialog.style.display = 'block';
+  _mp4Cancelled = false;
+
+  const closeDialog = () => { dialog.style.display = 'none'; _mp4Cancelled = true; };
+  btnX.onclick = closeDialog;
+
+  btnGo.onclick = async () => {
+    if (typeof VideoEncoder === 'undefined') {
+      status.classList.add('err');
+      status.textContent = 'WebCodecs is not available in this browser. Try Chrome/Edge.';
+      return;
+    }
+    btnGo.disabled = true; btnX.disabled = true;
+    status.classList.remove('err');
+    status.textContent = 'loading encoder…';
+    let MuxerMod;
+    try {
+      MuxerMod = await import('mp4-muxer');
+    } catch (e) {
+      status.classList.add('err');
+      status.textContent = 'failed to load mp4-muxer module — check network';
+      btnGo.disabled = false; btnX.disabled = false;
+      return;
+    }
+    const { Muxer, ArrayBufferTarget } = MuxerMod;
+
+    const duration = Math.max(1, parseInt(document.getElementById('mp4Duration').value, 10) || 8);
+    const fps      = Math.max(1, parseInt(document.getElementById('mp4Fps').value, 10) || 30);
+    let width      = Math.max(64, parseInt(document.getElementById('mp4Width').value, 10) || 1920);
+    let height     = Math.max(64, parseInt(document.getElementById('mp4Height').value, 10) || 1080);
+    const bitrate  = Math.max(1,  parseInt(document.getElementById('mp4Bitrate').value, 10) || 12) * 1_000_000;
+    // h264 needs even dims
+    if (width  % 2) width--;
+    if (height % 2) height--;
+    const totalFrames = duration * fps;
+
+    // Resize the renderer for the export, but keep the canvas off-screen-friendly
+    // by saving the original viewport and restoring it on completion.
+    const savedAspect = camera.aspect;
+    const savedDpr    = renderer.getPixelRatio();
+    const savedSize   = { w: renderer.domElement.width, h: renderer.domElement.height };
+    const savedCam    = camera.position.clone();
+    const savedTarget = controls.target.clone();
+    const savedEnabled = controls.enabled;
+
+    renderer.setPixelRatio(1);
+    renderer.setSize(width, height, false);
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    controls.enabled = false;
+
+    // Camera radius — keep current zoom level, orbit around the world Y axis.
+    const radius = camera.position.length();
+    const camY   = camera.position.y;
+    const xzRad  = Math.sqrt(Math.max(0, radius * radius - camY * camY));
+
+    let muxer, encoder;
+    try {
+      muxer = new Muxer({
+        target: new ArrayBufferTarget(),
+        video: { codec: 'avc', width, height, frameRate: fps },
+        fastStart: 'in-memory',
+      });
+      encoder = new VideoEncoder({
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+        error: e => { console.error(e); status.classList.add('err'); status.textContent = 'encoder error: ' + e.message; },
+      });
+      encoder.configure({
+        codec: 'avc1.640034',
+        width, height,
+        bitrate,
+        framerate: fps,
+        latencyMode: 'quality',
+        bitrateMode: 'constant',
+        avc: { format: 'annexb' },
+      });
+    } catch (e) {
+      status.classList.add('err');
+      status.textContent = 'encoder setup failed: ' + e.message;
+      // Restore renderer state
+      renderer.setPixelRatio(savedDpr);
+      renderer.setSize(savedSize.w, savedSize.h, false);
+      camera.aspect = savedAspect; camera.updateProjectionMatrix();
+      controls.enabled = savedEnabled;
+      btnGo.disabled = false; btnX.disabled = false;
+      return;
+    }
+
+    status.textContent = `rendering 0/${totalFrames}…`;
+    for (let i = 0; i < totalFrames; i++) {
+      if (_mp4Cancelled) break;
+      const t = i / totalFrames;
+      const a = t * Math.PI * 2;
+      camera.position.set(Math.cos(a) * xzRad, camY, Math.sin(a) * xzRad);
+      camera.lookAt(0, 0, 0);
+      renderer.render(scene, camera);
+      const frame = new VideoFrame(renderer.domElement, {
+        timestamp: Math.round(i * 1e6 / fps),
+        duration:  Math.round(1e6 / fps),
+      });
+      encoder.encode(frame, { keyFrame: i === 0 });
+      frame.close();
+      if ((i & 7) === 0) {
+        bar.style.width = `${(i / totalFrames * 100).toFixed(1)}%`;
+        status.textContent = `rendering ${i}/${totalFrames}…`;
+        // Yield to keep the UI responsive
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    if (!_mp4Cancelled) {
+      status.textContent = 'finalising…';
+      try {
+        await encoder.flush();
+        encoder.close();
+        muxer.finalize();
+        const buf = muxer.target.buffer;
+        const blob = new Blob([buf], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `hexsphere-turntable-${duration}s-${fps}fps.mp4`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        bar.style.width = '100%';
+        status.textContent = `done — ${(buf.byteLength / 1e6).toFixed(1)} MB`;
+      } catch (e) {
+        status.classList.add('err');
+        status.textContent = 'export failed: ' + e.message;
+      }
+    } else {
+      try { encoder.close(); } catch {}
+      status.textContent = 'cancelled';
+    }
+
+    // Restore the renderer + camera + controls.
+    renderer.setPixelRatio(savedDpr);
+    renderer.setSize(savedSize.w, savedSize.h, false);
+    camera.aspect = savedAspect;
+    camera.updateProjectionMatrix();
+    camera.position.copy(savedCam);
+    controls.target.copy(savedTarget);
+    controls.enabled = savedEnabled;
+    controls.update();
+
+    btnGo.disabled = false; btnX.disabled = false;
+  };
+}
+
+// ---------- Cell picking ----------
+// Voronoi-region picking: shoot a ray from the camera into the unit-sphere bounding
+// the cells. Whichever seed point is closest to the hit gives the cell. Cheap (50
+// cells × 1 dot product), works regardless of geometry options (chamfer, extrude,
+// inset don't change topology — cell index → seed centre is stable per build).
+const _pickRay = new THREE.Raycaster();
+const _pickSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), RADIUS * 1.6);
+function pickCellAt(clientX, clientY) {
+  if (!lastBuildSnapshot) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const x = ((clientX - rect.left) / rect.width)  * 2 - 1;
+  const y = -((clientY - rect.top)  / rect.height) * 2 + 1;
+  _pickRay.setFromCamera({ x, y }, camera);
+  // Hit-test against a slightly inflated sphere to absorb extruded geometry too.
+  const hit = new THREE.Vector3();
+  if (!_pickRay.ray.intersectSphere(_pickSphere, hit)) return null;
+  const dir = hit.clone().normalize();
+  let best = -1, bestDot = -Infinity;
+  const cellInfo = lastBuildSnapshot.cellInfo;
+  for (let i = 0; i < cellInfo.length; i++) {
+    const d = cellInfo[i].center.dot(dir);
+    if (d > bestDot) { bestDot = d; best = i; }
+  }
+  return best;
+}
+
+// ---------- UI wiring ----------
+const hexInput = document.getElementById('hexCount');
+const rebuildBtn = document.getElementById('rebuild');
+const scanBtn = document.getElementById('scan');
+const exportBtn = document.getElementById('export');
+const exportMp4Btn = document.getElementById('exportMp4');
+async function rebuild({ rerollSeed = false } = {}) {
+  const n = parseInt(hexInput.value, 10);
+  if (!Number.isFinite(n) || n < 8) return;
+  if (rerollSeed) currentSeed = (currentSeed + 1) | 0;
+  // Topology change → cell indices may map to different cells; clear overrides + selection.
+  cellOverrides.clear();
+  selectedCellIdx = null;
+  rebuildBtn.disabled = true;
+  rebuildBtn.textContent = 'generating…';
+  // Yield once so the button repaints before we block on Thomson.
+  await new Promise(r => setTimeout(r, 0));
+  try { build(n); }
+  finally {
+    rebuildBtn.textContent = 'generate';
+    rebuildBtn.disabled = false;
+  }
+}
+// Holding shift while clicking generate re-rolls the seed without changing hex count.
+rebuildBtn.addEventListener('click', e => rebuild({ rerollSeed: e.shiftKey }));
+rebuildBtn.title = 'click to regenerate (shift-click to re-roll seed)';
+hexInput.addEventListener('keydown', e => { if (e.key === 'Enter') rebuild(); });
+scanBtn.addEventListener('click', () => {
+  const center = parseInt(hexInput.value, 10);
+  const span = 25;
+  scanRange(Math.max(8, center - span), center + span);
+});
+exportBtn.addEventListener('click', exportOBJ);
+exportMp4Btn.addEventListener('click', exportMP4);
+document.getElementById('quality').addEventListener('change', () => {
+  // Quality only affects the next build; persist to URL so refreshes match.
+  if (lastBuildSnapshot) setUrlState(lastBuildSnapshot.hexCount, currentSeed);
+});
+
+// "copy link" — drop the current URL state on the clipboard.
+document.getElementById('shareLink').addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (lastBuildSnapshot) setUrlState(lastBuildSnapshot.hexCount, currentSeed);
+  try {
+    await navigator.clipboard.writeText(window.location.href);
+    e.target.textContent = 'copied!';
+    setTimeout(() => { e.target.textContent = 'copy link'; }, 1500);
+  } catch {
+    // Clipboard blocked — at least the URL is up to date in the address bar.
+    e.target.textContent = 'see address bar';
+    setTimeout(() => { e.target.textContent = 'copy link'; }, 1500);
+  }
+});
+
+// Pair each slider with its number input. Either control updates the other and triggers
+// a re-render against the cached topology (no Thomson rerun — instant). Number inputs
+// have no min/max so the user can type values past the slider range; the slider clamps
+// visually but the number drives the actual render.
+const GEOM_PAIRS = ['chamfer', 'chamferSub', 'extrude', 'extrudeScale', 'extrudeSub', 'inset', 'subdivision', 'height', 'curve'];
+function reRender() { if (lastBuildSnapshot) renderSnapshot(); }
+for (const id of GEOM_PAIRS) {
+  const num = document.getElementById(id);
+  const range = document.getElementById(id + 'Range');
+  num.addEventListener('input', () => {
+    range.value = num.value;
+    reRender();
+  });
+  range.addEventListener('input', () => {
+    num.value = range.value;
+    reRender();
+  });
+}
+document.getElementById('wireframeMesh').addEventListener('change', reRender);
+document.getElementById('triangulate').addEventListener('change', reRender);
+document.getElementById('sideMode').addEventListener('change', reRender);
+document.getElementById('chamferMat').addEventListener('change', reRender);
+document.getElementById('lit').addEventListener('change', reRender);
+
+// ---------- Flag controls ----------
+// Populate the cell-flag dropdown with all 48 country names, ordered alphabetically.
+const cellFlagSel = document.getElementById('cellFlag');
+const flagOptions = FLAG_FILES
+  .map((f, i) => ({ name: flagName(i), idx: i }))
+  .sort((a, b) => a.name.localeCompare(b.name));
+for (const { name, idx } of flagOptions) {
+  const opt = document.createElement('option');
+  opt.value = String(idx); opt.textContent = name;
+  cellFlagSel.appendChild(opt);
+}
+
+document.getElementById('flagFit').addEventListener('change', reRender);
+const FLAG_GLOBAL_PAIRS = [
+  ['globalFlagRotate', 'globalFlagRotateRange'],
+  ['globalFlagScale',  'globalFlagScaleRange'],
+];
+for (const [numId, rangeId] of FLAG_GLOBAL_PAIRS) {
+  const num = document.getElementById(numId);
+  const range = document.getElementById(rangeId);
+  num.addEventListener('input', () => { range.value = num.value; reRender(); });
+  range.addEventListener('input', () => { num.value = range.value; reRender(); });
+}
+
+// Per-cell panel: dropdown + rotation buttons + scale slider. All edit the
+// `cellOverrides` map and call reRender; nothing here triggers a topology rerun.
+function refreshCellPanel() {
+  const sel = document.getElementById('cellSel');
+  const fSel  = document.getElementById('cellFlag');
+  const rNum  = document.getElementById('cellRot');
+  const rMin  = document.getElementById('cellRotMinus');
+  const rPlus = document.getElementById('cellRotPlus');
+  const sNum  = document.getElementById('cellScale');
+  const sRng  = document.getElementById('cellScaleRange');
+  const reset = document.getElementById('cellReset');
+  const enabled = selectedCellIdx != null && lastBuildSnapshot;
+  for (const el of [fSel, rNum, rMin, rPlus, sNum, sRng, reset]) el.disabled = !enabled;
+  if (!enabled) {
+    sel.textContent = '(click a cell)';
+    return;
+  }
+  const c = lastBuildSnapshot.cellInfo[selectedCellIdx];
+  if (!c) { sel.textContent = '(no cell)'; return; }
+  if (!c.isHex) {
+    sel.textContent = `pent #${selectedCellIdx} (no flag)`;
+    for (const el of [fSel, rNum, rMin, rPlus, sNum, sRng, reset]) el.disabled = true;
+    return;
+  }
+  const ov = cellOverrides.get(selectedCellIdx) || {};
+  sel.textContent = `hex #${selectedCellIdx}`;
+  fSel.value = String(c.flagIdx);
+  rNum.value = String(ov.rotateDeg || 0);
+  const sPct = Math.round(((ov.scale ?? 1)) * 100);
+  sNum.value = String(sPct);
+  sRng.value = String(Math.max(25, Math.min(300, sPct)));
+}
+
+const setOverride = (patch) => {
+  if (selectedCellIdx == null) return;
+  const cur = cellOverrides.get(selectedCellIdx) || {};
+  const merged = { ...cur, ...patch };
+  cellOverrides.set(selectedCellIdx, merged);
+  reRender();
+};
+document.getElementById('cellFlag').addEventListener('change', e => {
+  const v = parseInt(e.target.value, 10);
+  if (Number.isFinite(v)) setOverride({ flagIdx: v });
+});
+document.getElementById('cellRot').addEventListener('input', e => {
+  const v = parseFloat(e.target.value) || 0;
+  setOverride({ rotateDeg: Math.round(v / 30) * 30 });
+  refreshCellPanel();
+});
+document.getElementById('cellRotMinus').addEventListener('click', () => {
+  const ov = cellOverrides.get(selectedCellIdx) || {};
+  setOverride({ rotateDeg: ((ov.rotateDeg || 0) - 30) });
+  refreshCellPanel();
+});
+document.getElementById('cellRotPlus').addEventListener('click', () => {
+  const ov = cellOverrides.get(selectedCellIdx) || {};
+  setOverride({ rotateDeg: ((ov.rotateDeg || 0) + 30) });
+  refreshCellPanel();
+});
+document.getElementById('cellScale').addEventListener('input', e => {
+  const v = (parseFloat(e.target.value) || 100) / 100;
+  document.getElementById('cellScaleRange').value = e.target.value;
+  setOverride({ scale: v });
+});
+document.getElementById('cellScaleRange').addEventListener('input', e => {
+  document.getElementById('cellScale').value = e.target.value;
+  setOverride({ scale: (parseFloat(e.target.value) || 100) / 100 });
+});
+document.getElementById('cellReset').addEventListener('click', () => {
+  if (selectedCellIdx == null) return;
+  cellOverrides.delete(selectedCellIdx);
+  reRender();
+  refreshCellPanel();
+});
+
+// ---------- Cell picking via canvas click ----------
+// Distinguish click-vs-drag so the OrbitControls drag doesn't immediately deselect
+// the cell we just picked.
+let _mouseDownX = 0, _mouseDownY = 0, _mouseMoved = false;
+renderer.domElement.addEventListener('pointerdown', e => {
+  _mouseDownX = e.clientX; _mouseDownY = e.clientY; _mouseMoved = false;
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  if (Math.hypot(e.clientX - _mouseDownX, e.clientY - _mouseDownY) > 4) _mouseMoved = true;
+});
+renderer.domElement.addEventListener('pointerup', e => {
+  if (_mouseMoved) return;
+  const idx = pickCellAt(e.clientX, e.clientY);
+  if (idx == null) return;
+  selectedCellIdx = idx;
+  refreshCellPanel();
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  // Hover info — name + position. Cheap; throttled by browser pointer cadence.
+  if (!lastBuildSnapshot) return;
+  const idx = pickCellAt(e.clientX, e.clientY);
+  const info = document.getElementById('pickInfo');
+  if (idx == null) { info.textContent = ''; return; }
+  const c = lastBuildSnapshot.cellInfo[idx];
+  if (!c) { info.textContent = ''; return; }
+  if (c.isHex) info.textContent = `hex #${idx} · ${flagName(c.flagIdx)}`;
+  else info.textContent = `pentagon #${idx}`;
+});
+
+// ---------- Initial build ----------
+// Honour ?hex=N&seed=K&quality=fast/standard/max URL params on first load.
+if (URL_QUALITY && QUALITY_PRESETS[URL_QUALITY]) {
+  document.getElementById('quality').value = URL_QUALITY;
+}
+if (Number.isFinite(URL_HEX) && URL_HEX >= 8) {
+  hexInput.value = String(URL_HEX);
+}
+
+build(parseInt(hexInput.value, 10));
+
+// ---------- render loop ----------
+function tick() {
+  requestAnimationFrame(tick);
+  controls.update();
+  renderer.render(scene, camera);
+}
+tick();
+</script>
+</body>
+</html>
