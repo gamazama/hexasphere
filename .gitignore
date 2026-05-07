@@ -4,6 +4,15 @@ hex-test/
 # OBJ snapshots from prior export sessions.
 backup/
 
+# Loose downloads from test-running the export buttons. The deployable runtime
+# only needs index.html + flags/worldcup-flags/ — anything else with these
+# extensions is a stray artefact.
+*.obj
+*.mtl
+*.zip
+hexsphere-turntable*.mp4
+hexsphere-*.json
+
 # Old single-file copy kept around as a working backup until index.html stabilises.
 hexsphere - Copy.html
 
