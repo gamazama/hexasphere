@@ -184,7 +184,7 @@
   }
   #flagControls .section {
     margin-top: 4px; padding-top: 6px; border-top: 1px solid #333;
-    color: #888; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: #888;
   }
   #flagControls .hint { color: #777; font-size: 10px; }
   /* Small "bump" buttons next to numeric inputs (±30° rotate, etc.) */
@@ -195,6 +195,58 @@
   }
   button.bumpBtn:hover { background: #333; }
   button.bumpBtn:disabled { color: #666; cursor: default; }
+  /* Collapsible panel + section system. Panels start with `display:none` so
+     nothing chrome shows until the user has built a sphere or selected a cell;
+     once revealed they can be collapsed/expanded by clicking the header. */
+  .panel-revealed { display: flex !important; }
+  .panel-closed > .panel-body { display: none; }
+  .panel-header {
+    cursor: pointer; user-select: none;
+    color: #ccc; font: 12px/1.4 ui-monospace, Menlo, monospace;
+    display: flex; gap: 6px; align-items: center;
+    padding: 1px 0;
+  }
+  .panel-header:hover { color: #fff; }
+  .panel-header .chev { color: #888; transition: transform 0.15s; display: inline-block; width: 10px; }
+  .panel-closed > .panel-header .chev { transform: rotate(-90deg); }
+
+  /* `fold` = collapsible sub-section inside a panel. Distinct from `.section`
+     which the flag panel already uses as a plain divider. */
+  .fold { display: flex; flex-direction: column; gap: 5px; }
+  .fold + .fold {
+    margin-top: 4px; padding-top: 6px; border-top: 1px solid #333;
+  }
+  .fold-h {
+    cursor: pointer; user-select: none;
+    color: #888; font: 12px/1.4 ui-monospace, Menlo, monospace;
+    display: flex; gap: 6px; align-items: center;
+  }
+  .fold-h:hover { color: #ccc; }
+  .fold-h .chev { transition: transform 0.15s; display: inline-block; width: 10px; }
+  .fold.closed > .fold-h .chev { transform: rotate(-90deg); }
+  .fold.closed > .fold-b { display: none; }
+  .fold-b { display: flex; flex-direction: column; gap: 5px; }
+
+  /* Conditional rows hide when their gating control is at its "off" value. */
+  .row.gated-hide { display: none !important; }
+
+  /* Floating cell handles — appear at the projected screen position of the
+     selected cell. Buttons rotate (±30°) and scale (±10%) the cell's flag UV
+     directly in the 3D viewport; same actions as the panel buttons. */
+  #cellHandles {
+    position: fixed; top: 0; left: 0;
+    display: none; gap: 4px;
+    transform: translate(-50%, 18px);
+    z-index: 10; user-select: none;
+    background: rgba(20,20,20,0.85); border: 1px solid #444; border-radius: 4px;
+    padding: 3px;
+  }
+  #cellHandles .handle {
+    background: #222; color: #fff; border: 1px solid #555;
+    padding: 2px 7px; font: 13px/1 ui-monospace, Menlo, monospace; cursor: pointer;
+    min-width: 22px;
+  }
+  #cellHandles .handle:hover { background: #333; }
   /* Cell-pick crosshair on hover */
   #pickInfo {
     position: fixed; bottom: 28px; left: 12px;
@@ -227,10 +279,6 @@
   </select>
   <button id="rebuild">generate</button>
   <button id="scan">scan range</button>
-  <button id="save" title="save the full configuration to a .json file">save</button>
-  <button id="load" title="load configuration from a .json file">load</button>
-  <button id="export">export obj</button>
-  <button id="exportMp4">export mp4</button>
   <input id="loadFile" type="file" accept=".json,application/json" style="display:none" />
 </div>
 <div id="scanResults"></div>
@@ -249,118 +297,165 @@
   </div>
 </div>
 <div id="pickInfo"></div>
-<!-- Geometry controls. Range inputs clamp to a sensible visual range; number inputs
-     are unbounded so users can type values past the slider min/max for extreme looks. -->
-<div id="geomControls">
-  <div class="row">
-    <span class="lbl">chamfer:</span>
-    <input id="chamferRange" type="range" min="0" max="50" step="1" value="0" />
-    <input id="chamfer" type="number" step="1" value="0" />
-    <span class="unit">%</span>
+<div id="cellHandles">
+  <button class="handle" type="button" data-action="rot-minus" title="rotate flag -30°">↺</button>
+  <button class="handle" type="button" data-action="rot-plus"  title="rotate flag +30°">↻</button>
+  <button class="handle" type="button" data-action="scale-down" title="shrink flag">−</button>
+  <button class="handle" type="button" data-action="scale-up"   title="grow flag">+</button>
+</div>
+<!-- Right panel — hidden until first build, then auto-revealed. Inside it,
+     each fold is independently collapsible and the body of the geometry fold
+     auto-hides rows that don't apply (e.g. chamfer-sub when chamfer = 0). -->
+<div id="geomControls" class="panel-closed" style="display:none">
+  <div class="panel-header" data-panel="geomControls">
+    <span class="chev">▾</span> controls
   </div>
-  <div class="row">
-    <span class="lbl">ch sub:</span>
-    <input id="chamferSubRange" type="range" min="0" max="20" step="1" value="0" />
-    <input id="chamferSub" type="number" step="1" value="0" />
-    <span class="unit"></span>
-  </div>
-  <div class="row">
-    <span class="lbl">ch mat:</span>
-    <select id="chamferMat">
-      <option value="dark" selected>dark</option>
-      <option value="light">light</option>
-      <option value="flag">stretched flag</option>
-    </select>
-  </div>
-  <div class="row">
-    <span class="lbl">extrude:</span>
-    <input id="extrudeRange" type="range" min="-100" max="100" step="1" value="0" />
-    <input id="extrude" type="number" step="1" value="0" />
-    <span class="unit">%</span>
-  </div>
-  <div class="row">
-    <span class="lbl">ex scale:</span>
-    <input id="extrudeScaleRange" type="range" min="0" max="200" step="1" value="100" />
-    <input id="extrudeScale" type="number" step="1" value="100" />
-    <span class="unit">%</span>
-  </div>
-  <div class="row">
-    <span class="lbl">ex sub:</span>
-    <input id="extrudeSubRange" type="range" min="0" max="20" step="1" value="0" />
-    <input id="extrudeSub" type="number" step="1" value="0" />
-    <span class="unit"></span>
-  </div>
-  <div class="row">
-    <span class="lbl">side:</span>
-    <select id="sideMode">
-      <option value="border" selected>dark border</option>
-      <option value="flag">stretched flag</option>
-    </select>
-  </div>
-  <div class="row">
-    <span class="lbl">inset:</span>
-    <input id="insetRange" type="range" min="0" max="99" step="1" value="0" />
-    <input id="inset" type="number" step="1" value="0" />
-    <span class="unit">%</span>
-  </div>
-  <div class="row">
-    <span class="lbl">sub:</span>
-    <input id="subdivisionRange" type="range" min="0" max="20" step="1" value="0" />
-    <input id="subdivision" type="number" step="1" value="0" />
-    <span class="unit"></span>
-  </div>
-  <div class="row">
-    <span class="lbl">height:</span>
-    <input id="heightRange" type="range" min="-100" max="100" step="1" value="0" />
-    <input id="height" type="number" step="1" value="0" />
-    <span class="unit">%</span>
-  </div>
-  <div class="row">
-    <span class="lbl">curve:</span>
-    <input id="curveRange" type="range" min="-100" max="100" step="1" value="0" />
-    <input id="curve" type="number" step="1" value="0" />
-    <span class="unit">%</span>
-  </div>
-  <div class="row">
-    <span class="lbl">preset:</span>
-    <select id="lightingPreset" title="lighting + backdrop preset (only effective when lit is on)">
-      <option value="studio" selected>studio</option>
-      <option value="stadium">stadium</option>
-      <option value="sunset">sunset</option>
-      <option value="spotlight">spotlight</option>
-      <option value="pitch">pitch</option>
-    </select>
-  </div>
-  <div class="row">
-    <span class="lbl">floor:</span>
-    <input id="floorYRange" type="range" min="-3" max="0" step="0.05" value="-1.55" />
-    <input id="floorY" type="number" step="0.05" value="-1.55" title="floor plane Y position (world units; sphere radius = 1)" />
-    <span class="unit"></span>
-  </div>
-  <div class="row">
-    <span class="lbl">shadow:</span>
-    <input id="shadowRadiusRange" type="range" min="0" max="30" step="1" value="12" />
-    <input id="shadowRadius" type="number" step="1" value="12" title="key-light shadow blur radius (PCF samples)" />
-    <span class="unit"></span>
-  </div>
-  <div class="row"><label class="cb"><input id="lit" type="checkbox" class="styled" /> lit + shadows + backdrop</label></div>
-  <div class="row"><label class="cb"><input id="wireframeMesh" type="checkbox" class="styled" /> wireframe mesh preview</label></div>
-  <div class="row"><label class="cb"><input id="triangulate" type="checkbox" class="styled" /> triangulate export</label></div>
-  <div class="row" style="gap:4px"><span class="lbl">obj scale:</span>
-    <input id="exportScale" type="number" step="1" value="100" title="OBJ vertex multiplier (Cinema 4D defaults to cm; 100 = 100 cm sphere)" style="width:60px"/>
-    <span class="unit"></span>
-  </div>
-  <div class="row" style="gap:4px"><span class="lbl">finish:</span>
-    <select id="exportIllum" title="material finish — drives both the live preview and the MTL/PBR fields written into the OBJ export">
-      <option value="1" selected>matte</option>
-      <option value="2">shiny</option>
-    </select>
+  <div class="panel-body">
+
+    <div class="fold" id="foldGeometry">
+      <div class="fold-h"><span class="chev">▾</span> geometry</div>
+      <div class="fold-b">
+        <div class="row">
+          <span class="lbl">chamfer:</span>
+          <input id="chamferRange" type="range" min="0" max="50" step="1" value="0" />
+          <input id="chamfer" type="number" step="1" value="0" />
+          <span class="unit">%</span>
+        </div>
+        <div class="row gated" data-gate="chamfer">
+          <span class="lbl">ch sub:</span>
+          <input id="chamferSubRange" type="range" min="0" max="20" step="1" value="0" />
+          <input id="chamferSub" type="number" step="1" value="0" />
+          <span class="unit"></span>
+        </div>
+        <div class="row gated" data-gate="chamfer">
+          <span class="lbl">ch mat:</span>
+          <select id="chamferMat">
+            <option value="dark" selected>dark</option>
+            <option value="light">light</option>
+            <option value="flag">stretched flag</option>
+          </select>
+        </div>
+        <div class="row">
+          <span class="lbl">extrude:</span>
+          <input id="extrudeRange" type="range" min="-100" max="100" step="1" value="0" />
+          <input id="extrude" type="number" step="1" value="0" />
+          <span class="unit">%</span>
+        </div>
+        <div class="row">
+          <span class="lbl">ex scale:</span>
+          <input id="extrudeScaleRange" type="range" min="0" max="200" step="1" value="100" />
+          <input id="extrudeScale" type="number" step="1" value="100" />
+          <span class="unit">%</span>
+        </div>
+        <div class="row gated" data-gate="extrude">
+          <span class="lbl">ex sub:</span>
+          <input id="extrudeSubRange" type="range" min="0" max="20" step="1" value="0" />
+          <input id="extrudeSub" type="number" step="1" value="0" />
+          <span class="unit"></span>
+        </div>
+        <div class="row gated" data-gate="extrude">
+          <span class="lbl">side:</span>
+          <select id="sideMode">
+            <option value="border" selected>dark border</option>
+            <option value="flag">stretched flag</option>
+          </select>
+        </div>
+        <div class="row">
+          <span class="lbl">inset:</span>
+          <input id="insetRange" type="range" min="0" max="99" step="1" value="0" />
+          <input id="inset" type="number" step="1" value="0" />
+          <span class="unit">%</span>
+        </div>
+        <div class="row gated" data-gate="inset">
+          <span class="lbl">sub:</span>
+          <input id="subdivisionRange" type="range" min="0" max="20" step="1" value="0" />
+          <input id="subdivision" type="number" step="1" value="0" />
+          <span class="unit"></span>
+        </div>
+        <div class="row gated" data-gate="inset">
+          <span class="lbl">height:</span>
+          <input id="heightRange" type="range" min="-100" max="100" step="1" value="0" />
+          <input id="height" type="number" step="1" value="0" />
+          <span class="unit">%</span>
+        </div>
+        <div class="row gated" data-gate="inset">
+          <span class="lbl">curve:</span>
+          <input id="curveRange" type="range" min="-100" max="100" step="1" value="0" />
+          <input id="curve" type="number" step="1" value="0" />
+          <span class="unit">%</span>
+        </div>
+        <div class="row"><label class="cb"><input id="wireframeMesh" type="checkbox" class="styled" /> wireframe mesh preview</label></div>
+      </div>
+    </div>
+
+    <div class="fold closed" id="foldLighting">
+      <div class="fold-h"><span class="chev">▾</span> lighting</div>
+      <div class="fold-b">
+        <div class="row">
+          <span class="lbl">preset:</span>
+          <select id="lightingPreset" title="lighting + backdrop preset (only effective when lit is on)">
+            <option value="studio" selected>studio</option>
+            <option value="stadium">stadium</option>
+            <option value="pitch">pitch</option>
+            <option value="trophy">trophy</option>
+            <option value="sunset">sunset</option>
+            <option value="dawn">dawn</option>
+            <option value="neon">neon</option>
+            <option value="arctic">arctic</option>
+            <option value="spotlight">spotlight</option>
+          </select>
+        </div>
+        <div class="row">
+          <span class="lbl">floor:</span>
+          <input id="floorYRange" type="range" min="-3" max="0" step="0.05" value="-1.55" />
+          <input id="floorY" type="number" step="0.05" value="-1.55" title="floor plane Y position (world units; sphere radius = 1)" />
+          <span class="unit"></span>
+        </div>
+        <div class="row">
+          <span class="lbl">shadow:</span>
+          <input id="shadowRadiusRange" type="range" min="0" max="30" step="1" value="12" />
+          <input id="shadowRadius" type="number" step="1" value="12" title="key-light shadow blur radius" />
+          <span class="unit"></span>
+        </div>
+        <div class="row"><label class="cb"><input id="lit" type="checkbox" class="styled" /> lit + shadows + backdrop</label></div>
+      </div>
+    </div>
+
+    <div class="fold closed" id="foldExport">
+      <div class="fold-h"><span class="chev">▾</span> export</div>
+      <div class="fold-b">
+        <div class="row" style="gap:4px"><span class="lbl">finish:</span>
+          <select id="exportIllum" title="material finish — drives the live preview and the MTL/PBR fields written into the OBJ export">
+            <option value="1" selected>matte</option>
+            <option value="2">shiny</option>
+          </select>
+        </div>
+        <div class="row" style="gap:4px"><span class="lbl">obj scale:</span>
+          <input id="exportScale" type="number" step="1" value="100" title="OBJ vertex multiplier (Cinema 4D defaults to cm; 100 = 100 cm sphere)" style="width:60px"/>
+          <span class="unit"></span>
+        </div>
+        <div class="row"><label class="cb"><input id="triangulate" type="checkbox" class="styled" /> triangulate export</label></div>
+        <div class="row" style="gap:4px;flex-wrap:wrap">
+          <button id="export"    class="bumpBtn" style="padding:3px 10px">export obj</button>
+          <button id="exportMp4" class="bumpBtn" style="padding:3px 10px">export mp4</button>
+        </div>
+        <div class="row" style="gap:4px;flex-wrap:wrap">
+          <button id="save" class="bumpBtn" style="padding:3px 10px" title="save the full configuration to a .json file">save state</button>
+          <button id="load" class="bumpBtn" style="padding:3px 10px" title="load configuration from a .json file">load state</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
 <!-- Flag panel — global UV transforms + per-cell selection / overrides.
-     Click a hex cell in the 3D view to populate the per-cell section. -->
-<div id="flagControls">
+     Hidden until the user clicks a hex cell, then auto-revealed. -->
+<div id="flagControls" class="panel-closed" style="display:none">
+  <div class="panel-header" data-panel="flagControls">
+    <span class="chev">▾</span> flags
+  </div>
+  <div class="panel-body">
   <div class="row">
     <span class="lbl">fit:</span>
     <select id="flagFit" title="cover crops the flag; extend keeps native aspect and clamps the edge across the rest of the cell">
@@ -400,6 +495,7 @@
   <div class="row">
     <button id="cellReset" type="button" class="bumpBtn" style="padding:2px 8px" disabled>reset</button>
     <span class="hint">click background to deselect</span>
+  </div>
   </div>
 </div>
 
@@ -561,6 +657,42 @@ const LIGHTING_PRESETS = {
     rim:  { color: 0xffffff, intensity: 1.4, position: [-2, 3, -3] },
     backdrop: [[0, '#3c5e3a'], [0.5, '#1c3220'], [1, '#0a1810']],
     floorOpacity: 0.55,
+  },
+  trophy: {
+    // Gold-display vibe — warm key + bronze rim, very saturated backdrop.
+    hemi: { sky: 0xffe8b0, ground: 0x382010, intensity: 0.7 },
+    key:  { color: 0xffe2a0, intensity: 3.2, position: [3, 5, 3] },
+    fill: { color: 0xc88040, intensity: 1.0, position: [-3, 0, -2] },
+    rim:  { color: 0xffd070, intensity: 2.0, position: [-2, 4, -3] },
+    backdrop: [[0, '#caa258'], [0.4, '#7a4818'], [0.8, '#2a1408'], [1, '#0d0604']],
+    floorOpacity: 0.5,
+  },
+  dawn: {
+    // Soft pink/peach sunrise wash — gentler than `sunset`, low-contrast.
+    hemi: { sky: 0xffc8d8, ground: 0x281828, intensity: 1.0 },
+    key:  { color: 0xffe0c8, intensity: 2.2, position: [4, 3, 2] },
+    fill: { color: 0xc0a0d0, intensity: 1.2, position: [-3, 1, -2] },
+    rim:  { color: 0xffb8a0, intensity: 1.4, position: [-2, 2, -3] },
+    backdrop: [[0, '#ffd4e0'], [0.4, '#f7a888'], [0.8, '#604070'], [1, '#1a1428']],
+    floorOpacity: 0.35,
+  },
+  neon: {
+    // Synthwave / arcade — magenta key, cyan rim, deep purple backdrop.
+    hemi: { sky: 0x402060, ground: 0x081020, intensity: 0.4 },
+    key:  { color: 0xff40c0, intensity: 3.8, position: [3, 4, 3] },
+    fill: { color: 0x40c8ff, intensity: 1.8, position: [-3, 1, -2] },
+    rim:  { color: 0x60ffff, intensity: 2.4, position: [-2, 3, -3] },
+    backdrop: [[0, '#3a1058'], [0.5, '#180828'], [1, '#040208']],
+    floorOpacity: 0.55,
+  },
+  arctic: {
+    // Cold high-key — very bright, near-white, faint blue cast.
+    hemi: { sky: 0xeff5ff, ground: 0x88a0b8, intensity: 1.4 },
+    key:  { color: 0xffffff, intensity: 3.0, position: [3, 6, 2] },
+    fill: { color: 0xc8d8ff, intensity: 1.6, position: [-3, 2, -2] },
+    rim:  { color: 0xffffff, intensity: 1.6, position: [-2, 3, -3] },
+    backdrop: [[0, '#e2ecf8'], [0.55, '#a8b8c8'], [1, '#5a6878']],
+    floorOpacity: 0.28,
   },
 };
 let backdropTexture = makeBackdropTexture(LIGHTING_PRESETS.studio.backdrop);
@@ -1586,7 +1718,11 @@ function setState(state) {
   }
   selectedCellIdx = null;
   const n = parseInt(document.getElementById('hexCount').value, 10);
-  if (Number.isFinite(n) && n >= 8) build(n);
+  if (Number.isFinite(n) && n >= 8) {
+    build(n);
+    revealRightPanel();
+    updateConditionalRows();
+  }
   refreshCellPanel();
   return true;
 }
@@ -2651,6 +2787,10 @@ async function exportMP4() {
 // breaks once extrude pushes geometry beyond it. Screen-space picking avoids
 // that pitfall and is just as cheap (50 cells × project = trivial per click).
 const _pickProj = new THREE.Vector3();
+// NDC-distance threshold beyond which a click counts as background (no cell).
+// Without this, the picker always returns the nearest seed even for clicks far
+// outside the sphere silhouette, so "click background to deselect" never fires.
+const PICK_NDC_THRESHOLD = 0.18;
 function pickCellAt(clientX, clientY) {
   if (!lastBuildSnapshot) return null;
   const rect = renderer.domElement.getBoundingClientRect();
@@ -2668,7 +2808,9 @@ function pickCellAt(clientX, clientY) {
     const d2 = dx * dx + dy * dy;
     if (d2 < bestD2) { bestD2 = d2; best = i; }
   }
-  return best === -1 ? null : best;
+  if (best === -1) return null;
+  if (bestD2 > PICK_NDC_THRESHOLD * PICK_NDC_THRESHOLD) return null;
+  return best;
 }
 
 // ---------- UI wiring ----------
@@ -2688,7 +2830,7 @@ async function rebuild({ rerollSeed = false } = {}) {
   rebuildBtn.textContent = 'generating…';
   // Yield once so the button repaints before we block on Thomson.
   await new Promise(r => setTimeout(r, 0));
-  try { build(n); }
+  try { build(n); revealRightPanel(); updateConditionalRows(); }
   finally {
     rebuildBtn.textContent = 'generate';
     rebuildBtn.disabled = false;
@@ -2754,6 +2896,83 @@ document.getElementById('shareLink').addEventListener('click', async (e) => {
 });
 
 function reRender() { if (lastBuildSnapshot) renderSnapshot(); }
+
+// ---------- Panel + section reveal / collapse ----------
+// Panels start hidden (display:none). The first reveal flips them into a flex
+// layout AND opens them; later calls are no-ops so manual collapses stick.
+function revealPanel(id) {
+  const p = document.getElementById(id);
+  if (p.classList.contains('panel-revealed')) return;
+  p.classList.add('panel-revealed');
+  p.classList.remove('panel-closed');
+}
+const revealRightPanel = () => revealPanel('geomControls');
+const revealLeftPanel  = () => revealPanel('flagControls');
+document.querySelectorAll('.panel-header').forEach(h => {
+  h.addEventListener('click', () => h.parentElement.classList.toggle('panel-closed'));
+});
+document.querySelectorAll('.fold-h').forEach(h => {
+  h.addEventListener('click', () => h.parentElement.classList.toggle('closed'));
+});
+
+// ---------- Conditional row visibility ----------
+// Rows tagged `.gated[data-gate=…]` only show when their gate is "on":
+//   chamfer  → ch sub, ch mat              (chamfer slider > 0)
+//   extrude  → ex sub, side                (extrude or extrudeScale ≠ default)
+//   inset    → sub, height, curve          (inset slider > 0)
+function updateConditionalRows() {
+  const num = id => parseFloat(document.getElementById(id)?.value) || 0;
+  const gates = {
+    chamfer: num('chamfer') > 0,
+    extrude: num('extrude') !== 0 || num('extrudeScale') !== 100,
+    inset:   num('inset') > 0,
+  };
+  document.querySelectorAll('#geomControls .row.gated').forEach(row => {
+    row.classList.toggle('gated-hide', !gates[row.dataset.gate]);
+  });
+}
+// Recheck on any input/change inside the right panel (cheap; pure DOM read).
+const _gcEl = document.getElementById('geomControls');
+_gcEl.addEventListener('input',  updateConditionalRows);
+_gcEl.addEventListener('change', updateConditionalRows);
+
+// ---------- On-sphere cell handles ----------
+const _cellHandlesEl = document.getElementById('cellHandles');
+const _handleProj = new THREE.Vector3();
+function updateCellHandlesPosition() {
+  if (selectedCellIdx == null || !lastBuildSnapshot) {
+    _cellHandlesEl.style.display = 'none';
+    return;
+  }
+  const c = lastBuildSnapshot.cellInfo[selectedCellIdx];
+  if (!c || !c.isHex) { _cellHandlesEl.style.display = 'none'; return; }
+  if (c.center.dot(camera.position) <= 0) {
+    // Back hemisphere of the sphere — hide handles so they don't render
+    // behind the sphere's silhouette.
+    _cellHandlesEl.style.display = 'none';
+    return;
+  }
+  _handleProj.copy(c.center).project(camera);
+  const rect = renderer.domElement.getBoundingClientRect();
+  const x = ( _handleProj.x + 1) * 0.5 * rect.width  + rect.left;
+  const y = (-_handleProj.y + 1) * 0.5 * rect.height + rect.top;
+  _cellHandlesEl.style.display = 'flex';
+  _cellHandlesEl.style.left = `${x}px`;
+  _cellHandlesEl.style.top  = `${y}px`;
+}
+document.querySelectorAll('#cellHandles .handle').forEach(b => {
+  b.addEventListener('click', e => {
+    e.stopPropagation();
+    if (selectedCellIdx == null) return;
+    const ov = cellOverrides.get(selectedCellIdx) || {};
+    const action = b.dataset.action;
+    if      (action === 'rot-minus')  setOverride({ rotateDeg: (ov.rotateDeg || 0) - 30 });
+    else if (action === 'rot-plus')   setOverride({ rotateDeg: (ov.rotateDeg || 0) + 30 });
+    else if (action === 'scale-down') setOverride({ scale: Math.max(0.1, (ov.scale ?? 1) - 0.1) });
+    else if (action === 'scale-up')   setOverride({ scale: (ov.scale ?? 1) + 0.1 });
+    refreshCellPanel();
+  });
+});
 
 // Wire a paired number↔range input so editing either mirrors the value to its
 // twin and triggers `onChange`. Number inputs are unbounded (no min/max) so the
@@ -2899,13 +3118,19 @@ renderer.domElement.addEventListener('pointermove', e => {
 renderer.domElement.addEventListener('pointerup', e => {
   if (_mouseMoved) return;
   const idx = pickCellAt(e.clientX, e.clientY);
-  if (idx == null) return;
+  if (idx == null) {
+    // Background click — deselect any selected cell.
+    if (selectedCellIdx !== null) {
+      selectedCellIdx = null;
+      refreshCellPanel();
+      reRender();
+    }
+    return;
+  }
   if (selectedCellIdx === idx) return;
   selectedCellIdx = idx;
+  revealLeftPanel();
   refreshCellPanel();
-  // Force a render so the yellow selection ring appears immediately. Without
-  // this the user only sees the change once another render is triggered (e.g.
-  // by editing a parameter).
   reRender();
 });
 let _lastHoverIdx = -2;
@@ -2924,12 +3149,12 @@ renderer.domElement.addEventListener('pointermove', e => {
 });
 
 // ---------- Initial build ----------
-// Prefer the new `?c=base64` full-state payload (set by save/share). Fall back
-// to the legacy short-form `?hex=&seed=&quality=` so older shareable links keep
-// working.
+// Empty page-load (no URL params) shows just the hex-count prompt — nothing
+// renders until the user clicks generate. URL state OR legacy ?hex=… auto-
+// builds and reveals the panel so shared links land on a usable scene.
 if (_initialUrlState) {
   setState(_initialUrlState);
-} else {
+} else if (Number.isFinite(URL_HEX) || URL_QUALITY) {
   if (URL_QUALITY && QUALITY_PRESETS[URL_QUALITY]) {
     document.getElementById('quality').value = URL_QUALITY;
   }
@@ -2937,6 +3162,8 @@ if (_initialUrlState) {
     hexInput.value = String(URL_HEX);
   }
   build(parseInt(hexInput.value, 10));
+  revealRightPanel();
+  updateConditionalRows();
 }
 
 // ---------- render loop ----------
@@ -2953,6 +3180,7 @@ function tick() {
     _lastCamQuat.copy(camera.quaternion);
   }
   renderer.render(scene, camera);
+  updateCellHandlesPosition();
 }
 tick();
 </script>
