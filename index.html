@@ -435,7 +435,10 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 // Shadows are configured per-render based on the lit toggle (see applyLitMode below).
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// VSM (variance shadow map) blurs the shadow map via a real Gaussian pass — unlike
+// PCFSoftShadowMap whose 25-tap kernel saturates around radius=4, VSM responds
+// linearly to `shadow.radius` so the softness slider has visible range.
+renderer.shadowMap.type = THREE.VSMShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -2282,13 +2285,24 @@ function generateOBJMTL(snapshot) {
   }
 
   // MTL — one material per used flag + pentagon dark.
-  // illum 1 = matte (Ks 0); illum 2 = glossy (Ks 0.3 + tighter Ns) so the C4D
-  // standard renderer actually shows visible specular highlights on the flags.
-  // Without bumping Ks, switching illum was a no-op because Ks stayed at 0.
-  const Ks = illum === '2' ? '0.300 0.300 0.300' : '0.000 0.000 0.000';
-  const Ns = illum === '2' ? '60.0'              : '10.0';
-  const KsDark = illum === '2' ? '0.150 0.150 0.150' : '0.000 0.000 0.000';
-  const NsDark = illum === '2' ? '40.0'              : '5.0';
+  //
+  // illum 1 (matte) and illum 2 (shiny) emit BOTH classic Phong fields
+  // (Ks/Ns/illum) and the modern PBR extension fields (Pr roughness,
+  // Pm metallic, Ke emission) so any importer picks up the shininess:
+  //   - Cinema 4D Standard renderer (legacy) reads Ns/Ks
+  //   - C4D Physical / Redshift / most modern PBR renderers ignore Ks for
+  //     textured materials and use Pr/Pm instead — without those, "shiny"
+  //     was a no-op even with Ks=0.7
+  //   - Blender / Maya / Houdini PBR all read Pr/Pm
+  const isShiny = illum === '2';
+  const Ks     = isShiny ? '0.800 0.800 0.800' : '0.000 0.000 0.000';
+  const Ns     = isShiny ? '300.0'             : '10.0';
+  const KsDark = isShiny ? '0.600 0.600 0.600' : '0.000 0.000 0.000';
+  const NsDark = isShiny ? '200.0'             : '5.0';
+  const Pr     = isShiny ? '0.10' : '0.85'; // PBR roughness — low = mirror-sharp
+  const Pm     = '0.00';                    // non-metallic for both modes
+  const PrDark = isShiny ? '0.18' : '0.90';
+  const pbrLines = (PrV, PmV) => [`Pr ${PrV}`, `Pm ${PmV}`, 'Ke 0.000 0.000 0.000'];
   const mtlLines = ['# Materials for hexsphere.obj', ''];
   for (const flagIdx of [...usedFlagIndices].sort((a, b) => a - b)) {
     const name = flagName(flagIdx);
@@ -2298,6 +2312,7 @@ function generateOBJMTL(snapshot) {
       'Kd 1.000 1.000 1.000',
       `Ks ${Ks}`,
       `Ns ${Ns}`,
+      ...pbrLines(Pr, Pm),
       'd 1.0',
       `illum ${illum}`,
       `map_Kd ${FLAG_DIR}${FLAG_FILES[flagIdx]}`,
@@ -2310,6 +2325,7 @@ function generateOBJMTL(snapshot) {
     'Kd 0.040 0.040 0.040',
     `Ks ${KsDark}`,
     `Ns ${NsDark}`,
+    ...pbrLines(PrDark, Pm),
     'd 1.0',
     `illum ${illum}`,
     ''
@@ -2321,6 +2337,7 @@ function generateOBJMTL(snapshot) {
       'Kd 0.040 0.040 0.040',
       `Ks ${KsDark}`,
       `Ns ${NsDark}`,
+      ...pbrLines(PrDark, Pm),
       'd 1.0',
       `illum ${illum}`,
       ''
@@ -2333,6 +2350,7 @@ function generateOBJMTL(snapshot) {
       'Kd 0.040 0.040 0.040',
       `Ks ${KsDark}`,
       `Ns ${NsDark}`,
+      ...pbrLines(PrDark, Pm),
       'd 1.0',
       `illum ${illum}`,
       ''
@@ -2345,6 +2363,7 @@ function generateOBJMTL(snapshot) {
       'Kd 0.933 0.933 0.933',
       `Ks ${Ks}`,
       `Ns ${Ns}`,
+      ...pbrLines(Pr, Pm),
       'd 1.0',
       `illum ${illum}`,
       ''
