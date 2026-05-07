@@ -321,6 +321,28 @@
     <input id="curve" type="number" step="1" value="0" />
     <span class="unit">%</span>
   </div>
+  <div class="row">
+    <span class="lbl">preset:</span>
+    <select id="lightingPreset" title="lighting + backdrop preset (only effective when lit is on)">
+      <option value="studio" selected>studio</option>
+      <option value="stadium">stadium</option>
+      <option value="sunset">sunset</option>
+      <option value="spotlight">spotlight</option>
+      <option value="pitch">pitch</option>
+    </select>
+  </div>
+  <div class="row">
+    <span class="lbl">floor:</span>
+    <input id="floorYRange" type="range" min="-3" max="0" step="0.05" value="-1.55" />
+    <input id="floorY" type="number" step="0.05" value="-1.55" title="floor plane Y position (world units; sphere radius = 1)" />
+    <span class="unit"></span>
+  </div>
+  <div class="row">
+    <span class="lbl">shadow:</span>
+    <input id="shadowRadiusRange" type="range" min="0" max="30" step="1" value="12" />
+    <input id="shadowRadius" type="number" step="1" value="12" title="key-light shadow blur radius (PCF samples)" />
+    <span class="unit"></span>
+  </div>
   <div class="row"><label class="cb"><input id="lit" type="checkbox" class="styled" /> lit + shadows + backdrop</label></div>
   <div class="row"><label class="cb"><input id="wireframeMesh" type="checkbox" class="styled" /> wireframe mesh preview</label></div>
   <div class="row"><label class="cb"><input id="triangulate" type="checkbox" class="styled" /> triangulate export</label></div>
@@ -349,7 +371,6 @@
   <div class="row">
     <span class="lbl">all rot:</span>
     <button id="globalRotMinus" type="button" class="bumpBtn" title="rotate all -30°">−30°</button>
-    <input id="globalFlagRotateRange" type="range" min="-180" max="180" step="1" value="0" />
     <input id="globalFlagRotate" type="number" step="1" value="0" />
     <button id="globalRotPlus" type="button" class="bumpBtn" title="rotate all +30°">+30°</button>
   </div>
@@ -478,15 +499,12 @@ studioRig.add(rimLight);
 // always covers the canvas regardless of orbit angle. Because it goes through
 // scene.background it's drawn before any 3D object — the floor's shadow reads
 // against it cleanly.
-function makeBackdropTexture() {
+function makeBackdropTexture(stops) {
   const c = document.createElement('canvas');
   c.width = 4; c.height = 1024;
   const ctx = c.getContext('2d');
   const g = ctx.createLinearGradient(0, 0, 0, c.height);
-  g.addColorStop(0.00, '#5e6878'); // top — light slate
-  g.addColorStop(0.55, '#2a2f3a'); // mid — body
-  g.addColorStop(0.85, '#1a1d24'); // horizon shadow
-  g.addColorStop(1.00, '#0d0f14'); // floor edge
+  for (const [pos, color] of stops) g.addColorStop(pos, color);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, c.width, c.height);
   const t = new THREE.CanvasTexture(c);
@@ -495,7 +513,75 @@ function makeBackdropTexture() {
   t.magFilter = THREE.LinearFilter;
   return t;
 }
-const backdropTexture = makeBackdropTexture();
+
+// Lighting presets — light colours/intensities, backdrop gradient stops, floor
+// shadow opacity. `applyLightingPreset` swaps all three at once. Studio is the
+// neutral default; the others lean into world-cup-broadcast vibes.
+const LIGHTING_PRESETS = {
+  studio: {
+    hemi: { sky: 0xeef2ff, ground: 0x3a3535, intensity: 0.85 },
+    key:  { color: 0xfff0d8, intensity: 2.4, position: [3, 5, 3] },
+    fill: { color: 0xb0c8ff, intensity: 1.1, position: [-3, 1, -2] },
+    rim:  { color: 0xffffff, intensity: 1.4, position: [-2, 3, -4] },
+    backdrop: [[0, '#5e6878'], [0.55, '#2a2f3a'], [0.85, '#1a1d24'], [1, '#0d0f14']],
+    floorOpacity: 0.45,
+  },
+  stadium: {
+    hemi: { sky: 0xccddee, ground: 0x081410, intensity: 0.35 },
+    key:  { color: 0xffffff, intensity: 3.4, position: [2, 7, 2] },
+    fill: { color: 0x88a0c8, intensity: 1.5, position: [-3, 4, -2] },
+    rim:  { color: 0xeeffee, intensity: 2.4, position: [0, 3, -5] },
+    backdrop: [[0, '#1f3858'], [0.5, '#091828'], [1, '#000510']],
+    floorOpacity: 0.6,
+  },
+  sunset: {
+    hemi: { sky: 0xffd8a8, ground: 0x2a1830, intensity: 0.9 },
+    key:  { color: 0xff9858, intensity: 3.0, position: [4, 2, 3] },
+    fill: { color: 0x6080ff, intensity: 1.1, position: [-3, 0, -2] },
+    rim:  { color: 0xffbb77, intensity: 1.6, position: [-2, 1, -4] },
+    backdrop: [[0, '#ffa860'], [0.35, '#d04848'], [0.75, '#601850'], [1, '#080418']],
+    floorOpacity: 0.42,
+  },
+  spotlight: {
+    hemi: { sky: 0x303038, ground: 0x080808, intensity: 0.18 },
+    key:  { color: 0xffffff, intensity: 4.5, position: [2, 6, 3] },
+    fill: { color: 0x303040, intensity: 0.4, position: [-2, 0, -2] },
+    rim:  { color: 0xa0c0ff, intensity: 1.0, position: [-1, 2, -3] },
+    backdrop: [[0, '#181820'], [0.6, '#080810'], [1, '#000000']],
+    floorOpacity: 0.7,
+  },
+  pitch: {
+    // World-cup field vibe: bright overhead, green ground bounce.
+    hemi: { sky: 0xddeedd, ground: 0x1c4022, intensity: 1.1 },
+    key:  { color: 0xfffaee, intensity: 2.8, position: [3, 6, 2] },
+    fill: { color: 0x80c898, intensity: 1.2, position: [-2, 1, -2] },
+    rim:  { color: 0xffffff, intensity: 1.4, position: [-2, 3, -3] },
+    backdrop: [[0, '#3c5e3a'], [0.5, '#1c3220'], [1, '#0a1810']],
+    floorOpacity: 0.55,
+  },
+};
+let backdropTexture = makeBackdropTexture(LIGHTING_PRESETS.studio.backdrop);
+
+function applyLightingPreset(name) {
+  const p = LIGHTING_PRESETS[name] || LIGHTING_PRESETS.studio;
+  hemiLight.color.setHex(p.hemi.sky);
+  hemiLight.groundColor.setHex(p.hemi.ground);
+  hemiLight.intensity = p.hemi.intensity;
+  keyLight.color.setHex(p.key.color);
+  keyLight.intensity = p.key.intensity;
+  keyLight.position.set(...p.key.position);
+  fillLight.color.setHex(p.fill.color);
+  fillLight.intensity = p.fill.intensity;
+  fillLight.position.set(...p.fill.position);
+  rimLight.color.setHex(p.rim.color);
+  rimLight.intensity = p.rim.intensity;
+  rimLight.position.set(...p.rim.position);
+  backdropTexture.dispose();
+  backdropTexture = makeBackdropTexture(p.backdrop);
+  // Hot-swap the live background if we're already in lit mode.
+  if (scene.background && scene.background.isTexture) scene.background = backdropTexture;
+  floorMesh.material.opacity = p.floorOpacity;
+}
 
 // Floor: a transparent shadow-receiver attached to the studio rig so it follows
 // the camera and always reads as "ground beneath the sphere" in screen space.
@@ -1401,7 +1487,12 @@ function getState() {
     geom,
     sideMode: val('sideMode'),
     chamferMat: val('chamferMat'),
-    render: { lit: chk('lit'), wire: chk('wireframeMesh'), triangulate: chk('triangulate') },
+    preset: val('lightingPreset'),
+    render: {
+      lit: chk('lit'), wire: chk('wireframeMesh'), triangulate: chk('triangulate'),
+      floorY: num('floorY'),
+      shadowRadius: num('shadowRadius'),
+    },
     flag: {
       fit: val('flagFit'),
       globalRotate: num('globalFlagRotate'),
@@ -1451,14 +1542,27 @@ function setState(state) {
   }
   setSel('sideMode', state.sideMode);
   setSel('chamferMat', state.chamferMat);
+  if (state.preset && LIGHTING_PRESETS[state.preset]) {
+    setSel('lightingPreset', state.preset);
+    applyLightingPreset(state.preset);
+  }
   if (state.render) {
     setChk('lit', state.render.lit);
     setChk('wireframeMesh', state.render.wire);
     setChk('triangulate', state.render.triangulate);
+    if (Number.isFinite(state.render.floorY)) {
+      setNum('floorY', state.render.floorY);
+      setNum('floorYRange', state.render.floorY);
+      floorMesh.position.y = state.render.floorY;
+    }
+    if (Number.isFinite(state.render.shadowRadius)) {
+      setNum('shadowRadius', state.render.shadowRadius);
+      setNum('shadowRadiusRange', state.render.shadowRadius);
+      keyLight.shadow.radius = Math.max(0, state.render.shadowRadius);
+    }
   }
   if (state.flag) {
     setNum('globalFlagRotate', state.flag.globalRotate);
-    setNum('globalFlagRotateRange', state.flag.globalRotate);
     setNum('globalFlagScale', state.flag.globalScale);
     setNum('globalFlagScaleRange', state.flag.globalScale);
     setSel('flagFit', state.flag.fit);
@@ -2177,7 +2281,14 @@ function generateOBJMTL(snapshot) {
     }
   }
 
-  // MTL — one material per used flag + pentagon dark
+  // MTL — one material per used flag + pentagon dark.
+  // illum 1 = matte (Ks 0); illum 2 = glossy (Ks 0.3 + tighter Ns) so the C4D
+  // standard renderer actually shows visible specular highlights on the flags.
+  // Without bumping Ks, switching illum was a no-op because Ks stayed at 0.
+  const Ks = illum === '2' ? '0.300 0.300 0.300' : '0.000 0.000 0.000';
+  const Ns = illum === '2' ? '60.0'              : '10.0';
+  const KsDark = illum === '2' ? '0.150 0.150 0.150' : '0.000 0.000 0.000';
+  const NsDark = illum === '2' ? '40.0'              : '5.0';
   const mtlLines = ['# Materials for hexsphere.obj', ''];
   for (const flagIdx of [...usedFlagIndices].sort((a, b) => a - b)) {
     const name = flagName(flagIdx);
@@ -2185,8 +2296,8 @@ function generateOBJMTL(snapshot) {
       `newmtl flag_${name}`,
       'Ka 1.000 1.000 1.000',
       'Kd 1.000 1.000 1.000',
-      'Ks 0.000 0.000 0.000',
-      'Ns 10.0',
+      `Ks ${Ks}`,
+      `Ns ${Ns}`,
       'd 1.0',
       `illum ${illum}`,
       `map_Kd ${FLAG_DIR}${FLAG_FILES[flagIdx]}`,
@@ -2197,10 +2308,10 @@ function generateOBJMTL(snapshot) {
     'newmtl pent_dark',
     'Ka 0.020 0.020 0.020',
     'Kd 0.040 0.040 0.040',
-    'Ks 0.000 0.000 0.000',
-    'Ns 5.0',
+    `Ks ${KsDark}`,
+    `Ns ${NsDark}`,
     'd 1.0',
-    'illum 2',
+    `illum ${illum}`,
     ''
   );
   if (usedBorder) {
@@ -2208,8 +2319,8 @@ function generateOBJMTL(snapshot) {
       'newmtl extrude_border',
       'Ka 0.020 0.020 0.020',
       'Kd 0.040 0.040 0.040',
-      'Ks 0.000 0.000 0.000',
-      'Ns 5.0',
+      `Ks ${KsDark}`,
+      `Ns ${NsDark}`,
       'd 1.0',
       `illum ${illum}`,
       ''
@@ -2220,8 +2331,8 @@ function generateOBJMTL(snapshot) {
       'newmtl chamfer_dark',
       'Ka 0.020 0.020 0.020',
       'Kd 0.040 0.040 0.040',
-      'Ks 0.000 0.000 0.000',
-      'Ns 5.0',
+      `Ks ${KsDark}`,
+      `Ns ${NsDark}`,
       'd 1.0',
       `illum ${illum}`,
       ''
@@ -2232,8 +2343,8 @@ function generateOBJMTL(snapshot) {
       'newmtl chamfer_light',
       'Ka 0.800 0.800 0.800',
       'Kd 0.933 0.933 0.933',
-      'Ks 0.000 0.000 0.000',
-      'Ns 10.0',
+      `Ks ${Ks}`,
+      `Ns ${Ns}`,
       'd 1.0',
       `illum ${illum}`,
       ''
@@ -2331,6 +2442,11 @@ async function exportOBJ() {
 // export OBJs. Mirrors the lifecycle in dev/engine/export/videoEncoder.ts but
 // with a smaller dependency footprint suitable for an importmap-only standalone.
 let _mp4Cancelled = false;
+// While the MP4 export is running, tick() steps aside so its rAF-driven
+// `controls.update()` + render don't race with the synchronous export loop
+// (damping/no-op renders mid-iteration were causing the captured shadow to
+// drift back-and-forth every few frames).
+let _mp4Recording = false;
 async function exportMP4() {
   const dialog = document.getElementById('mp4Dialog');
   const status = document.getElementById('mp4Status');
@@ -2390,6 +2506,7 @@ async function exportMP4() {
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     controls.enabled = false;
+    _mp4Recording = true;
 
     // Camera radius — keep current zoom level, orbit around the world Y axis.
     const radius = camera.position.length();
@@ -2424,6 +2541,7 @@ async function exportMP4() {
       renderer.setSize(savedSize.w, savedSize.h, false);
       camera.aspect = savedAspect; camera.updateProjectionMatrix();
       controls.enabled = savedEnabled;
+      _mp4Recording = false;
       btnGo.disabled = false; btnX.disabled = false;
       return;
     }
@@ -2486,6 +2604,7 @@ async function exportMP4() {
     controls.target.copy(savedTarget);
     controls.enabled = savedEnabled;
     controls.update();
+    _mp4Recording = false;
 
     btnGo.disabled = false; btnX.disabled = false;
   };
@@ -2623,6 +2742,20 @@ document.getElementById('triangulate').addEventListener('change', reRender);
 document.getElementById('sideMode').addEventListener('change', reRender);
 document.getElementById('chamferMat').addEventListener('change', reRender);
 document.getElementById('lit').addEventListener('change', reRender);
+document.getElementById('lightingPreset').addEventListener('change', e => {
+  applyLightingPreset(e.target.value);
+  reRender();
+});
+bindNumRangePair('floorY', 'floorYRange', () => {
+  const v = parseFloat(document.getElementById('floorY').value);
+  if (Number.isFinite(v)) floorMesh.position.y = v;
+  reRender();
+});
+bindNumRangePair('shadowRadius', 'shadowRadiusRange', () => {
+  const v = parseFloat(document.getElementById('shadowRadius').value);
+  keyLight.shadow.radius = Math.max(0, Number.isFinite(v) ? v : 12);
+  reRender();
+});
 
 // ---------- Flag controls ----------
 // Populate the cell-flag dropdown with all 48 country names, ordered alphabetically.
@@ -2637,15 +2770,14 @@ for (const { name, idx } of flagOptions) {
 }
 
 document.getElementById('flagFit').addEventListener('change', reRender);
-bindNumRangePair('globalFlagRotate', 'globalFlagRotateRange');
-bindNumRangePair('globalFlagScale',  'globalFlagScaleRange');
+// global-rotate is now button + number only (slider was removed to match the
+// per-cell rot row's shape), so it doesn't go through bindNumRangePair.
+document.getElementById('globalFlagRotate').addEventListener('input', reRender);
+bindNumRangePair('globalFlagScale', 'globalFlagScaleRange');
 
 function bumpGlobalRot(delta) {
   const num = document.getElementById('globalFlagRotate');
-  const range = document.getElementById('globalFlagRotateRange');
-  const v = (parseFloat(num.value) || 0) + delta;
-  num.value = String(v);
-  range.value = String(Math.max(-180, Math.min(180, v)));
+  num.value = String((parseFloat(num.value) || 0) + delta);
   reRender();
 }
 document.getElementById('globalRotMinus').addEventListener('click', () => bumpGlobalRot(-30));
@@ -2782,6 +2914,7 @@ if (_initialUrlState) {
 const _lastCamQuat = new THREE.Quaternion();
 function tick() {
   requestAnimationFrame(tick);
+  if (_mp4Recording) return;
   controls.update();
   if (renderer.shadowMap.enabled && !_lastCamQuat.equals(camera.quaternion)) {
     studioRig.quaternion.copy(camera.quaternion);
