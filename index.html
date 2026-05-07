@@ -2687,8 +2687,16 @@ async function exportMP4() {
         video: { codec: 'avc', width, height, frameRate: fps },
         fastStart: 'in-memory',
       });
+      // Firefox-safe encoder output handler. Firefox sends `meta.decoderConfig`
+      // only on the first chunk; mp4-muxer assumes the muxer can keep reading
+      // it later, then crashes accessing decoderConfig.colorSpace on null.
+      // Cache the first non-null meta + reuse it on every subsequent call.
+      let _cachedMeta = null;
       encoder = new VideoEncoder({
-        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+        output: (chunk, meta) => {
+          if (meta && meta.decoderConfig) _cachedMeta = meta;
+          muxer.addVideoChunk(chunk, _cachedMeta || meta);
+        },
         error: e => { console.error(e); status.classList.add('err'); status.textContent = 'encoder error: ' + e.message; },
       });
       encoder.configure({
@@ -2936,6 +2944,21 @@ const _gcEl = document.getElementById('geomControls');
 _gcEl.addEventListener('input',  updateConditionalRows);
 _gcEl.addEventListener('change', updateConditionalRows);
 
+// Live URL state — debounce so dragging a slider doesn't spam history.replaceState.
+// "copy link" still works as before but the address bar now reflects the current
+// scene at all times, so refreshing the page during a session preserves work.
+let _urlUpdateTimer = null;
+function scheduleUrlUpdate() {
+  if (!lastBuildSnapshot) return;
+  clearTimeout(_urlUpdateTimer);
+  _urlUpdateTimer = setTimeout(setUrlState, 400);
+}
+_gcEl.addEventListener('input',  scheduleUrlUpdate);
+_gcEl.addEventListener('change', scheduleUrlUpdate);
+const _flagEl = document.getElementById('flagControls');
+_flagEl.addEventListener('input',  scheduleUrlUpdate);
+_flagEl.addEventListener('change', scheduleUrlUpdate);
+
 // ---------- On-sphere cell handles ----------
 const _cellHandlesEl = document.getElementById('cellHandles');
 const _handleProj = new THREE.Vector3();
@@ -3073,6 +3096,7 @@ const setOverride = (patch) => {
   const merged = { ...cur, ...patch };
   cellOverrides.set(selectedCellIdx, merged);
   reRender();
+  scheduleUrlUpdate();
 };
 document.getElementById('cellFlag').addEventListener('change', e => {
   const v = parseInt(e.target.value, 10);
