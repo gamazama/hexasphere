@@ -257,7 +257,7 @@
 </head>
 <body>
 <div id="hud">drag to rotate · scroll to zoom · click a cell to edit its flag</div>
-<div id="loading">loading flags 0/48…</div>
+<div id="loading">loading flags…</div>
 <div id="footer">
   <a href="https://gmt-fractals.com" target="_blank" rel="noopener">GMT</a>
   <span class="sep">·</span>
@@ -271,6 +271,11 @@
 <div id="controls">
   hexagons:
   <input id="hexCount" type="number" min="8" max="500" value="50" />
+  set:
+  <select id="flagSet" title="which flag pack to draw onto the sphere">
+    <option value="worldcup" selected>World Cup</option>
+    <option value="standard-bank">Standard Bank</option>
+  </select>
   quality:
   <select id="quality" title="topology search effort">
     <option value="fast">fast</option>
@@ -755,44 +760,71 @@ function clearSphere() {
   sphereObjects.length = 0;
 }
 
-// ---------- Flag library (48 worldcup flags) ----------
-const FLAG_DIR = 'flags/worldcup-flags/';
-const FLAG_FILES = [
-  'algeria.png','argentina.png','australia.png','austria.png',
-  'belgium.png','bosnia-and-herzegovina.png','brazil.png','cabo-verde.png',
-  'canada.png','colombia.png','congo-dr.png','cote-divoire.png',
-  'croatia.png','curacao.png','czechia.png','ecuador.png',
-  'egypt.png','england.png','france.png','germany.png',
-  'ghana.png','haiti.png','iran.png','iraq.png',
-  'japan.png','jordan.png','korea-republic.png','mexico.png',
-  'morocco.png','netherlands.png','new-zealand.png','norway.png',
-  'panama.png','paraguay.png','portugal.png','qatar.png',
-  'saudi-arabia.png','scotland.png','senegal.png','south-africa.png',
-  'spain.png','sweden.png','switzerland.png','tunisia.png',
-  'turkiye.png','uruguay.png','usa.png','uzbekistan.png',
-];
+// ---------- Flag library ----------
+// Multiple selectable sets. Each set is a folder + ordered file list; the user
+// switches between them via the top-bar dropdown. FLAG_DIR / FLAG_FILES / etc.
+// stay as the live "active set" references so the rest of the code doesn't
+// care about indirection — it just reads the current arrays.
+const FLAG_SETS = {
+  worldcup: {
+    label: 'World Cup',
+    dir: 'flags/worldcup-flags/',
+    files: [
+      'algeria.png','argentina.png','australia.png','austria.png',
+      'belgium.png','bosnia-and-herzegovina.png','brazil.png','cabo-verde.png',
+      'canada.png','colombia.png','congo-dr.png','cote-divoire.png',
+      'croatia.png','curacao.png','czechia.png','ecuador.png',
+      'egypt.png','england.png','france.png','germany.png',
+      'ghana.png','haiti.png','iran.png','iraq.png',
+      'japan.png','jordan.png','korea-republic.png','mexico.png',
+      'morocco.png','netherlands.png','new-zealand.png','norway.png',
+      'panama.png','paraguay.png','portugal.png','qatar.png',
+      'saudi-arabia.png','scotland.png','senegal.png','south-africa.png',
+      'spain.png','sweden.png','switzerland.png','tunisia.png',
+      'turkiye.png','uruguay.png','usa.png','uzbekistan.png',
+    ],
+  },
+  'standard-bank': {
+    label: 'Standard Bank',
+    dir: 'flags/standard-bank/',
+    files: [
+      'angola.png','botswana.png','china.png','congo-dr.png',
+      'cote-divoire.png','egypt.png','eswatini.png','ethiopia.png',
+      'ghana.png','isle-of-man.png','jersey.png','kenya.png',
+      'lesotho.png','malawi.png','mauritius.png','mozambique.png',
+      'namibia.png','nigeria.png','south-africa.png','south-sudan.png',
+      'tanzania.png','uganda.png','united-arab-emirates.png','united-kingdom.png',
+      'usa.png','zambia.png','zimbabwe.png',
+    ],
+  },
+};
+let activeFlagSet = 'worldcup';
+let FLAG_DIR = FLAG_SETS[activeFlagSet].dir;
+let FLAG_FILES = FLAG_SETS[activeFlagSet].files;
 // Material name used in OBJ/MTL — derived from filename (no extension)
 const flagName = i => FLAG_FILES[i].replace(/\.[^.]+$/, '');
 
-// Per-flag aspect ratios (image width / height), populated after textures load.
-// Default 1.5 (3:2 — most common national flag ratio) for cells built before load.
-let flagAspects = new Array(48).fill(1.5);
+// Per-flag aspect ratios, populated after textures load. Default 1.5 (3:2 —
+// most common national flag ratio) for cells built before the textures arrive.
+let flagAspects = new Array(FLAG_FILES.length).fill(1.5);
 
 // Rotation applied to UV basis on every cell (degrees, CCW around cell centre).
 const FLAG_ROTATION_DEG = 30;
 
 // Async-load all flag textures up front. Cached for re-use across builds.
 // `flagsLoadedPromise` lets gating code (rebuild button, MP4 export) wait for
-// the full set rather than rendering placeholder greys mid-build.
+// the full set rather than rendering placeholder greys mid-build. Swapped out
+// on every set switch.
 let flagTextures = null;
 let flagsReady = false;
+let flagsLoadedPromise = null;
 const loadingEl = document.getElementById('loading');
 function setLoadingProgress(loaded, total, failed) {
   if (!loadingEl) return;
+  loadingEl.classList.remove('done');
   if (loaded >= total) {
     if (failed > 0) {
       loadingEl.textContent = `loaded ${total - failed}/${total} flags (${failed} failed)`;
-      // Still hide after a brief flash so the UI isn't blocked
       setTimeout(() => loadingEl.classList.add('done'), 1500);
     } else {
       loadingEl.classList.add('done');
@@ -801,39 +833,70 @@ function setLoadingProgress(loaded, total, failed) {
     loadingEl.textContent = `loading flags ${loaded}/${total}…`;
   }
 }
-const flagsLoadedPromise = (async () => {
-  const loader = new THREE.TextureLoader();
-  let loaded = 0, failed = 0;
-  const tasks = FLAG_FILES.map((f, i) => new Promise((res) => {
-    loader.load(FLAG_DIR + f, t => {
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.minFilter = THREE.LinearFilter;
-      t.magFilter = THREE.LinearFilter;
-      // Edge clamp is critical for the "extend" fit mode — UVs may go outside [0,1]
-      // and we want the sampled colour to be the flag's edge pixel, not a wrapped
-      // copy of the opposite side.
-      t.wrapS = THREE.ClampToEdgeWrapping;
-      t.wrapT = THREE.ClampToEdgeWrapping;
-      t.anisotropy = 4;
-      const w = t.image?.naturalWidth || t.image?.width;
-      const h = t.image?.naturalHeight || t.image?.height;
-      if (w && h) flagAspects[i] = w / h;
-      loaded++;
-      setLoadingProgress(loaded, FLAG_FILES.length, failed);
-      res(t);
-    }, undefined, () => {
-      console.warn('Failed to load', FLAG_FILES[i]);
-      loaded++; failed++;
-      setLoadingProgress(loaded, FLAG_FILES.length, failed);
-      res(null);
-    });
-  }));
-  flagTextures = await Promise.all(tasks);
-  flagsReady = true;
-  console.log(`Loaded ${flagTextures.filter(Boolean).length}/${flagTextures.length} flag textures`);
-  // If a build already ran with placeholder grey, rebuild now that textures exist.
-  if (typeof window.__lastHex === 'number') build(window.__lastHex);
-})();
+function loadCurrentFlagSet() {
+  flagTextures = null;
+  flagsReady = false;
+  flagAspects = new Array(FLAG_FILES.length).fill(1.5);
+  flagsLoadedPromise = (async () => {
+    const loader = new THREE.TextureLoader();
+    let loaded = 0, failed = 0;
+    const currentFiles = FLAG_FILES;
+    const currentDir   = FLAG_DIR;
+    const tasks = currentFiles.map((f, i) => new Promise((res) => {
+      loader.load(currentDir + f, t => {
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.minFilter = THREE.LinearFilter;
+        t.magFilter = THREE.LinearFilter;
+        t.wrapS = THREE.ClampToEdgeWrapping;
+        t.wrapT = THREE.ClampToEdgeWrapping;
+        t.anisotropy = 4;
+        const w = t.image?.naturalWidth || t.image?.width;
+        const h = t.image?.naturalHeight || t.image?.height;
+        // Guard: a slow set-switch race could let an old loader callback fire
+        // after FLAG_FILES has been swapped — ignore it.
+        if (currentFiles !== FLAG_FILES) { res(null); return; }
+        if (w && h) flagAspects[i] = w / h;
+        loaded++;
+        setLoadingProgress(loaded, currentFiles.length, failed);
+        res(t);
+      }, undefined, () => {
+        console.warn('Failed to load', currentDir + f);
+        if (currentFiles !== FLAG_FILES) { res(null); return; }
+        loaded++; failed++;
+        setLoadingProgress(loaded, currentFiles.length, failed);
+        res(null);
+      });
+    }));
+    const loadedTextures = await Promise.all(tasks);
+    // Discard stale results if the set was switched mid-flight.
+    if (currentFiles !== FLAG_FILES) return;
+    flagTextures = loadedTextures;
+    flagsReady = true;
+    console.log(`Loaded ${flagTextures.filter(Boolean).length}/${flagTextures.length} flag textures from ${currentDir}`);
+    // If a build already ran with placeholder grey, rebuild now textures exist.
+    if (typeof window.__lastHex === 'number') build(window.__lastHex);
+  })();
+  return flagsLoadedPromise;
+}
+loadCurrentFlagSet();
+
+// Switch the active set, reload textures, then rebuild if a sphere is live.
+async function switchFlagSet(setName) {
+  if (!FLAG_SETS[setName] || setName === activeFlagSet) return;
+  activeFlagSet = setName;
+  FLAG_DIR = FLAG_SETS[setName].dir;
+  FLAG_FILES = FLAG_SETS[setName].files;
+  // Per-cell overrides reference flag indices from the OLD set — they're
+  // meaningless against the new one and would mis-paint cells; drop them.
+  cellOverrides.clear();
+  selectedCellIdx = null;
+  rebuildCellFlagDropdown();
+  await loadCurrentFlagSet();
+  if (lastBuildSnapshot) {
+    build(lastBuildSnapshot.hexCount);
+    refreshCellPanel();
+  }
+}
 
 // Compute UV mapping for a cell so a flag image is shown on it.
 //
@@ -1623,6 +1686,7 @@ function getState() {
     hex: intVal('hexCount'),
     seed: currentSeed,
     quality: val('quality'),
+    flagSet: activeFlagSet,
     geom,
     sideMode: val('sideMode'),
     chamferMat: val('chamferMat'),
@@ -1669,6 +1733,18 @@ function setState(state) {
   if (Number.isFinite(state.hex)) setNum('hexCount', state.hex);
   if (Number.isFinite(state.seed)) currentSeed = state.seed;
   setSel('quality', state.quality);
+  // Switch flag set BEFORE build so the right files are loaded. Synchronous-
+  // ish: we kick the texture reload but don't await — build() runs with the
+  // new set's FLAG_FILES (placeholder grey until textures arrive, then the
+  // loader's tail callback rebuilds).
+  if (state.flagSet && FLAG_SETS[state.flagSet] && state.flagSet !== activeFlagSet) {
+    activeFlagSet = state.flagSet;
+    FLAG_DIR = FLAG_SETS[activeFlagSet].dir;
+    FLAG_FILES = FLAG_SETS[activeFlagSet].files;
+    setSel('flagSet', activeFlagSet);
+    rebuildCellFlagDropdown();
+    loadCurrentFlagSet();
+  }
   if (state.geom) {
     for (const f of GEOM_FIELDS) {
       const v = state.geom[f];
@@ -1818,14 +1894,14 @@ function build(hexCount) {
   // Greedy max-min spacing: every flag used (nearly) the same number of times, with
   // any duplicates pushed as far apart on the sphere as possible. Seed mixes hexCount
   // and the URL-driven currentSeed so re-rolls produce different arrangements.
-  const assignments = assignFlagsSpaced(hexCells, 48, hexCount * 31 + 7 + currentSeed * 9173);
+  const assignments = assignFlagsSpaced(hexCells, FLAG_FILES.length, hexCount * 31 + 7 + currentSeed * 9173);
   // baseFlagIdx is the assignment-determined flag; flagIdx is what currently renders
   // (override or base). Storing both lets `cell reset` restore the original without
   // re-running the assignment greedy.
   hexCells.forEach((c, i) => { c.baseFlagIdx = assignments[i]; c.flagIdx = assignments[i]; });
 
   // Diagnostic: report the closest pair of same-flag cells (lower bound on duplicate spacing)
-  if (hexCells.length > 48) {
+  if (hexCells.length > FLAG_FILES.length) {
     let minDup = Infinity, dupFlag = -1;
     const byFlag = new Map();
     for (const c of hexCells) {
@@ -2887,6 +2963,10 @@ document.getElementById('quality').addEventListener('change', () => {
   // Quality only affects the next build; persist to URL so refreshes match.
   if (lastBuildSnapshot) setUrlState();
 });
+document.getElementById('flagSet').addEventListener('change', async (e) => {
+  await switchFlagSet(e.target.value);
+  if (lastBuildSnapshot) setUrlState();
+});
 
 // "copy link" — drop the current URL state on the clipboard.
 document.getElementById('shareLink').addEventListener('click', async (e) => {
@@ -3032,16 +3112,21 @@ bindNumRangePair('shadowRadius', 'shadowRadiusRange', () => {
 });
 
 // ---------- Flag controls ----------
-// Populate the cell-flag dropdown with all 48 country names, ordered alphabetically.
+// Populate the cell-flag dropdown alphabetically from the active set. Called
+// once at boot and again whenever the user switches flag sets.
 const cellFlagSel = document.getElementById('cellFlag');
-const flagOptions = FLAG_FILES
-  .map((f, i) => ({ name: flagName(i), idx: i }))
-  .sort((a, b) => a.name.localeCompare(b.name));
-for (const { name, idx } of flagOptions) {
-  const opt = document.createElement('option');
-  opt.value = String(idx); opt.textContent = name;
-  cellFlagSel.appendChild(opt);
+function rebuildCellFlagDropdown() {
+  cellFlagSel.innerHTML = '<option value="">—</option>';
+  const flagOptions = FLAG_FILES
+    .map((f, i) => ({ name: flagName(i), idx: i }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  for (const { name, idx } of flagOptions) {
+    const opt = document.createElement('option');
+    opt.value = String(idx); opt.textContent = name;
+    cellFlagSel.appendChild(opt);
+  }
 }
+rebuildCellFlagDropdown();
 
 document.getElementById('flagFit').addEventListener('change', reRender);
 // global-rotate is now button + number only (slider was removed to match the
